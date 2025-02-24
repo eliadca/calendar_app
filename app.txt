@@ -1545,4 +1545,3964 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
 
 
-3.
+3.lib/database_helper.dart
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:share_plus/share_plus.dart';
+
+class DatabaseHelper {
+  static final DatabaseHelper instance = DatabaseHelper._init();
+  static Database? _database;
+
+  DatabaseHelper._init();
+
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDB('smart_calendar.db');
+    return _database!;
+  }
+
+  Future<Database> _initDB(String filePath) async {
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, filePath);
+    return await openDatabase(
+      path,
+      version: 4,
+      onCreate: _createDB,
+      onUpgrade: _upgradeDB,
+    );
+  }
+
+  Future _createDB(Database db, int version) async {
+    // Crear tabla de eventos
+    await db.execute('''
+      CREATE TABLE events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        isReminder INTEGER NOT NULL DEFAULT 0,
+        reminderTime TEXT,
+        hours REAL DEFAULT 0.0,
+        category TEXT NOT NULL DEFAULT 'Otros',
+        note TEXT,
+        recurrence TEXT
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_events_date ON events(date)');
+    await db.execute('CREATE INDEX idx_events_category ON events(category)');
+
+    // Crear tabla de notas
+    await db.execute('''
+      CREATE TABLE notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        content TEXT NOT NULL,
+        isCompleted INTEGER NOT NULL DEFAULT 0,
+        isHandwritten INTEGER NOT NULL DEFAULT 0,
+        tags TEXT DEFAULT '[]',
+        audioPath TEXT,
+        isFavorite INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_notes_date ON notes(date)');
+
+    // Crear tabla de metas
+    await db.execute('''
+      CREATE TABLE goals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        year INTEGER NOT NULL,
+        hours REAL NOT NULL DEFAULT 600.0
+      )
+    ''');
+  }
+
+  Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    // Lógica para migraciones futuras
+  }
+
+  // ***** Métodos para eventos *****
+  Future<int> insertEvent(Map<String, dynamic> event) async {
+    final db = await database;
+    return await db.insert('events', event);
+  }
+
+  Future<List<Map<String, dynamic>>> getEventsByDate(String date) async {
+    final db = await database;
+    // Utilizamos 'LIKE' para filtrar por la parte inicial del campo date
+    return await db.query(
+      'events',
+      where: 'date LIKE ?',
+      whereArgs: ['$date%'],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getEventsByPeriod(DateTime start, DateTime end) async {
+    final db = await database;
+    // Se filtra entre start.toIso8601String() y end.toIso8601String()
+    return await db.query(
+      'events',
+      where: 'date >= ? AND date <= ?',
+      whereArgs: [start.toIso8601String(), end.toIso8601String()],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getEventsByMonth(DateTime month) async {
+    final db = await database;
+    final start = DateTime(month.year, month.month, 1);
+    final end = DateTime(month.year, month.month + 1, 0);
+    return await db.query(
+      'events',
+      where: 'date >= ? AND date <= ?',
+      whereArgs: [start.toIso8601String(), end.toIso8601String()],
+    );
+  }
+
+  Future<int> updateEvent(Map<String, dynamic> event) async {
+    final db = await database;
+    return await db.update(
+      'events',
+      event,
+      where: 'id = ?',
+      whereArgs: [event['id']],
+    );
+  }
+
+  Future<int> deleteEvent(int id) async {
+    final db = await database;
+    return await db.delete('events', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<double> getMonthlyHours(DateTime date) async {
+    final db = await database;
+    final startOfMonth = DateTime(date.year, date.month, 1);
+    final endOfMonth = DateTime(date.year, date.month + 1, 0);
+    final result = await db.rawQuery(
+      'SELECT SUM(hours) as total FROM events WHERE date >= ? AND date <= ?',
+      [startOfMonth.toIso8601String(), endOfMonth.toIso8601String()],
+    );
+    // Si no hay registros, devolvemos 0.0
+    return result.first['total'] as double? ?? 0.0;
+  }
+
+  Future<List<Map<String, dynamic>>> getYearlyHours(int year) async {
+    final db = await database;
+    // strftime con '%Y' obtiene el año desde la columna date
+    return await db.rawQuery(
+      '''
+      SELECT strftime("%m", date) as month, SUM(hours) as total
+      FROM events
+      WHERE strftime("%Y", date) = ?
+      GROUP BY strftime("%m", date)
+      ''',
+      [year.toString()],
+    );
+  }
+
+  // ***** Métodos para notas *****
+  Future<int> insertNote(Map<String, dynamic> note) async {
+    final db = await database;
+    return await db.insert('notes', note);
+  }
+
+  Future<List<Map<String, dynamic>>> getAllNotes() async {
+    final db = await database;
+    return await db.query('notes', orderBy: 'date DESC');
+  }
+
+  Future<int> updateNote(Map<String, dynamic> note) async {
+    final db = await database;
+    return await db.update(
+      'notes',
+      note,
+      where: 'id = ?',
+      whereArgs: [note['id']],
+    );
+  }
+
+  Future<int> deleteNote(int id) async {
+    final db = await database;
+    return await db.delete('notes', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ***** Métodos para metas (goals) *****
+  Future<void> setGoal(int year, double hours) async {
+    final db = await database;
+    // REPLACE para sobrescribir la meta si ya existe
+    await db.insert(
+      'goals',
+      {'year': year, 'hours': hours},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<double> getGoal(int year) async {
+    final db = await database;
+    final result = await db.query(
+      'goals',
+      where: 'year = ?',
+      whereArgs: [year],
+    );
+    // Si no existe, devolvemos 600.0 como valor por defecto
+    return result.isNotEmpty ? result.first['hours'] as double : 600.0;
+  }
+
+  // ***** Métodos de respaldo y restauración *****
+  Future<void> backupDatabase() async {
+    final dbPath = await getDatabasesPath();
+    final dbFile = File(join(dbPath, 'smart_calendar.db'));
+    final backupDir = await getTemporaryDirectory();
+    final backupFile = File(
+      join(backupDir.path, 'smart_calendar_backup_${DateTime.now().millisecondsSinceEpoch}.db'),
+    );
+    // Copiamos la base de datos actual en un archivo temporal
+    await dbFile.copy(backupFile.path);
+    // Compartimos el archivo .db usando share_plus
+    await Share.shareXFiles(
+      [XFile(backupFile.path)],
+      text: 'Respaldo de Smart Calendar',
+    );
+  }
+
+  Future<void> restoreDatabase() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['db'],
+    );
+    if (result != null && result.files.single.path != null) {
+      final backupFile = File(result.files.single.path!);
+      final dbPath = await getDatabasesPath();
+      final dbFile = File(join(dbPath, 'smart_calendar.db'));
+
+      // Cerramos la conexión actual antes de sobreescribir la base de datos
+      await _database?.close();
+      await backupFile.copy(dbFile.path);
+
+      // Forzamos la reapertura de la base de datos
+      _database = null;
+      await database;
+    }
+  }
+
+  Future<void> clearDatabase() async {
+    final db = await database;
+    await db.delete('events');
+    await db.delete('notes');
+    await db.delete('goals');
+  }
+}
+
+
+
+
+4.lib/main.dart
+import 'package:flutter/material.dart';
+import 'package:calendar_app/calendar_screen.dart';
+import 'package:calendar_app/report_screen.dart';
+import 'package:calendar_app/notes_screen.dart';
+import 'package:calendar_app/notification_helper.dart';
+import 'package:calendar_app/settings_screen.dart';
+import 'package:calendar_app/dashboard_screen.dart';
+import 'package:calendar_app/widget_helper.dart';
+import 'package:animated_bottom_navigation_bar/animated_bottom_navigation_bar.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await NotificationHelper.init();
+  await WidgetHelper.initialize();
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => AppState()),
+      ],
+      child: const CalendarApp(),
+    ),
+  );
+}
+
+class ThemeProvider with ChangeNotifier {
+  ThemeMode _themeMode = ThemeMode.system;
+
+  ThemeMode get themeMode => _themeMode;
+
+  ThemeProvider() {
+    _loadTheme();
+  }
+
+  Future<void> _loadTheme() async {
+    final prefs = await SharedPreferences.getInstance();
+    final themeIndex = prefs.getInt('themeMode') ?? ThemeMode.system.index;
+    _themeMode = ThemeMode.values[themeIndex];
+    notifyListeners();
+  }
+
+  Future<void> setTheme(ThemeMode mode) async {
+    _themeMode = mode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('themeMode', mode.index);
+    notifyListeners();
+    await WidgetHelper.updateWidgetData();
+  }
+}
+
+class AppState with ChangeNotifier {
+  bool _isFirstRun = true;
+
+  bool get isFirstRun => _isFirstRun;
+
+  AppState() {
+    _checkFirstRun();
+  }
+
+  Future<void> _checkFirstRun() async {
+    final prefs = await SharedPreferences.getInstance();
+    _isFirstRun = prefs.getBool('isFirstRun') ?? true;
+    if (_isFirstRun) {
+      await prefs.setBool('isFirstRun', false);
+    }
+    notifyListeners();
+  }
+
+  Future<void> resetFirstRun() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isFirstRun', true);
+    _isFirstRun = true;
+    notifyListeners();
+  }
+}
+
+class CalendarApp extends StatelessWidget {
+  const CalendarApp({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer2<ThemeProvider, AppState>(
+      builder: (context, themeProvider, appState, child) {
+        return MaterialApp(
+          title: 'Smart Calendar',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            brightness: Brightness.light,
+            primaryColor: Colors.blueAccent,
+            scaffoldBackgroundColor: Colors.white,
+            cardColor: Colors.grey[100],
+            textTheme: const TextTheme(
+              headlineMedium:
+                  TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87),
+              bodyMedium:
+                  TextStyle(fontSize: 16, color: Colors.black54),
+            ),
+            appBarTheme: const AppBarTheme(
+              elevation: 0,
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.black87,
+            ),
+            floatingActionButtonTheme: const FloatingActionButtonThemeData(
+              elevation: 4,
+              backgroundColor: Colors.blueAccent,
+              foregroundColor: Colors.white,
+            ),
+          ),
+          darkTheme: ThemeData(
+            brightness: Brightness.dark,
+            primaryColor: Colors.blueGrey,
+            scaffoldBackgroundColor: Colors.grey[900],
+            cardColor: Colors.grey[850],
+            textTheme: const TextTheme(
+              headlineMedium:
+                  TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white70),
+              bodyMedium:
+                  TextStyle(fontSize: 16, color: Colors.white60),
+            ),
+            appBarTheme: const AppBarTheme(
+              elevation: 0,
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.white70,
+            ),
+            floatingActionButtonTheme: const FloatingActionButtonThemeData(
+              elevation: 4,
+              backgroundColor: Colors.blueGrey,
+              foregroundColor: Colors.white,
+            ),
+          ),
+          themeMode: themeProvider.themeMode,
+          home: appState.isFirstRun ? const OnboardingScreen() : const MainScreen(),
+        );
+      },
+    );
+  }
+}
+
+class MainScreen extends StatefulWidget {
+  const MainScreen({Key? key}) : super(key: key);
+
+  @override
+  State<MainScreen> createState() => _MainScreenState();
+}
+
+class _MainScreenState extends State<MainScreen> {
+  int _currentIndex = 0;
+  late PageController _pageController;
+
+  final List<Widget> _screens = [
+    const DashboardScreen(),
+    const CalendarScreen(),
+    const ReportScreen(),
+    const NotesScreen(),
+    const SettingsScreen(),
+  ];
+
+  final List<IconData> _icons = [
+    Icons.home,
+    Icons.calendar_today,
+    Icons.analytics,
+    Icons.note_alt,
+    Icons.settings,
+  ];
+
+  final List<String> _labels = [
+    'Inicio',
+    'Calendario',
+    'Informes',
+    'Notas',
+    'Ajustes',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: _currentIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          PageView(
+            controller: _pageController,
+            physics: const NeverScrollableScrollPhysics(),
+            children: _screens,
+            onPageChanged: (index) {
+              setState(() {
+                _currentIndex = index;
+              });
+            },
+          ),
+          Positioned(
+            bottom: 80,
+            right: 16,
+            child: FloatingActionButton(
+              onPressed: () => _showQuickActionMenu(context),
+              child: const Icon(Icons.add),
+            ),
+          ),
+        ],
+      ),
+      bottomNavigationBar: AnimatedBottomNavigationBar.builder(
+        itemCount: _icons.length,
+        tabBuilder: (int index, bool isActive) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AnimatedScale(
+                scale: isActive ? 1.1 : 1.0,
+                duration: const Duration(milliseconds: 150),
+                child: Icon(
+                  _icons[index],
+                  size: 24,
+                  color: isActive
+                      ? Theme.of(context).primaryColor
+                      : Theme.of(context).textTheme.bodyMedium!.color,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _labels[index],
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isActive
+                      ? Theme.of(context).primaryColor
+                      : Theme.of(context).textTheme.bodyMedium!.color,
+                ),
+              ),
+            ],
+          );
+        },
+        activeIndex: _currentIndex,
+        gapLocation: GapLocation.none,
+        notchSmoothness: NotchSmoothness.smoothEdge,
+        leftCornerRadius: 16,
+        rightCornerRadius: 16,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+          _pageController.animateToPage(
+            index,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+          );
+        },
+        backgroundColor: Theme.of(context).cardColor,
+        elevation: 8,
+      ),
+    );
+  }
+
+  void _showQuickActionMenu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      backgroundColor: Theme.of(context).cardColor,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.event, color: Colors.blueAccent),
+                title: const Text('Nuevo Evento'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const CalendarScreen()));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.access_time, color: Colors.green),
+                title: const Text('Registrar Horas'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const CalendarScreen()));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.note_add, color: Colors.orange),
+                title: const Text('Nueva Nota'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const NotesScreen()));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.analytics, color: Colors.purple),
+                title: const Text('Ver Informe Rápido'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportScreen()));
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class OnboardingScreen extends StatefulWidget {
+  const OnboardingScreen({Key? key}) : super(key: key);
+
+  @override
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
+}
+
+class _OnboardingScreenState extends State<OnboardingScreen> {
+  final PageController _pageController = PageController();
+  int _currentPage = 0;
+
+  final List<Map<String, String>> _onboardingData = [
+    {
+      'title': 'Bienvenido a Smart Calendar',
+      'description': 'Organiza tus eventos, horas predicadas y notas en un solo lugar.',
+    },
+    {
+      'title': 'Explora el Calendario',
+      'description': 'Añade eventos, registra horas y mueve tus planes fácilmente.',
+    },
+    {
+      'title': 'Analiza tus Informes',
+      'description': 'Sigue tus metas y exporta resúmenes detallados.',
+    },
+    {
+      'title': 'Toma Notas Avanzadas',
+      'description': 'Escribe, dibuja y organiza tus ideas con flexibilidad.',
+    },
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: PageView.builder(
+                controller: _pageController,
+                itemCount: _onboardingData.length,
+                onPageChanged: (index) {
+                  setState(() {
+                    _currentPage = index;
+                  });
+                },
+                itemBuilder: (context, index) {
+                  return Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          _onboardingData[index]['title']!,
+                          style: Theme.of(context).textTheme.headlineMedium,
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          _onboardingData[index]['description']!,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                _onboardingData.length,
+                (index) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: _currentPage == index ? 12 : 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _currentPage == index
+                        ? Theme.of(context).primaryColor
+                        : Colors.grey,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 32),
+            ElevatedButton(
+              onPressed: () {
+                if (_currentPage < _onboardingData.length - 1) {
+                  _pageController.nextPage(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                  );
+                } else {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (_) => const MainScreen()),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).primaryColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: Text(_currentPage == _onboardingData.length - 1 ? 'Comenzar' : 'Siguiente'),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+
+
+5.lib/notes_screen.dart
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:calendar_app/database_helper.dart';
+import 'package:calendar_app/notification_helper.dart';
+import 'package:flutter_quill/flutter_quill.dart' as quill;
+import 'package:hand_signature/signature.dart';
+import 'package:hand_signature/svg_parser.dart';
+
+import 'dart:convert';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'dart:io';
+import 'package:share_plus/share_plus.dart';
+
+class Note {
+  final int id;
+  final String content;
+  final DateTime date;
+  final bool isCompleted;
+  final bool isHandwritten;
+  final List<String> tags;
+  final String? audioPath;
+  final bool isFavorite;
+
+  Note({
+    required this.id,
+    required this.content,
+    required this.date,
+    required this.isCompleted,
+    required this.isHandwritten,
+    required this.tags,
+    this.audioPath,
+    required this.isFavorite,
+  });
+}
+
+class NotesScreen extends StatefulWidget {
+  const NotesScreen({Key? key}) : super(key: key);
+
+  @override
+  _NotesScreenState createState() => _NotesScreenState();
+}
+
+class _NotesScreenState extends State<NotesScreen> {
+  late TextEditingController _searchController;
+  List<Note> _allNotes = [];
+  List<Note> _filteredNotes = [];
+  String _sortCriteria = 'date';
+  bool _sortAscending = true;
+  bool _gridView = false;
+  String? _selectedTag;
+  DateTime? _startDateFilter;
+  DateTime? _endDateFilter;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  static const List<String> _predefinedTags = ['Urgente', 'Idea', 'Tarea', 'Predicación', 'Reunión'];
+  String _searchHighlight = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+    _loadNotes();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadNotes() async {
+    final notes = await DatabaseHelper.instance.getAllNotes();
+    setState(() {
+      _allNotes = notes.map((note) => Note(
+        id: note['id'],
+        content: note['content'],
+        date: DateTime.parse(note['date']),
+        isCompleted: note['isCompleted'] == 1,
+        isHandwritten: note['isHandwritten'] == 1,
+        tags: List<String>.from(jsonDecode(note['tags'] ?? '[]')),
+        audioPath: note['audioPath'],
+        isFavorite: note['isFavorite'] == 1,
+      )).toList();
+      _applyFiltersAndSort();
+    });
+  }
+
+  void _applyFiltersAndSort() {
+    _filteredNotes = List.from(_allNotes);
+
+    // Filtro por texto
+    if (_searchController.text.isNotEmpty) {
+      _searchHighlight = _searchController.text.toLowerCase();
+      _filteredNotes = _filteredNotes.where((note) {
+        final content = _parseContent(note.content, note.isHandwritten);
+        return content.toLowerCase().contains(_searchHighlight);
+      }).toList();
+    } else {
+      _searchHighlight = '';
+    }
+
+    // Filtro por etiqueta
+    if (_selectedTag != null) {
+      _filteredNotes = _filteredNotes.where((note) => note.tags.contains(_selectedTag)).toList();
+    }
+
+    // Filtro por fechas
+    if (_startDateFilter != null) {
+      _filteredNotes = _filteredNotes.where(
+        (note) => note.date.isAfter(_startDateFilter!.subtract(const Duration(days: 1))),
+      ).toList();
+    }
+    if (_endDateFilter != null) {
+      _filteredNotes = _filteredNotes.where(
+        (note) => note.date.isBefore(_endDateFilter!.add(const Duration(days: 1))),
+      ).toList();
+    }
+
+    // Ordenamiento
+    _filteredNotes.sort((a, b) {
+      int comparison;
+      switch (_sortCriteria) {
+        case 'date':
+          comparison = a.date.compareTo(b.date);
+          break;
+        case 'content':
+          comparison = _parseContent(a.content, a.isHandwritten)
+              .compareTo(_parseContent(b.content, b.isHandwritten));
+          break;
+        case 'completed':
+          comparison = (a.isCompleted ? 1 : 0).compareTo(b.isCompleted ? 1 : 0);
+          break;
+        default:
+          comparison = 0;
+      }
+      return _sortAscending ? comparison : -comparison;
+    });
+
+    setState(() {});
+  }
+
+  String _parseContent(String content, bool isHandwritten) {
+    if (isHandwritten) return 'Nota manuscrita';
+    try {
+      final delta = jsonDecode(content) as List;
+      return delta.map((op) => op['insert']?.toString() ?? '').join();
+    } catch (e) {
+      return content;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Notas', style: TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.sort),
+            onPressed: _showSortOptions,
+          ),
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () {
+              setState(() {
+                _searchController.clear();
+                _applyFiltersAndSort();
+              });
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.download),
+            onPressed: _exportAllNotes,
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_comment),
+            onPressed: _addQuickNote,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          _buildFilterBar(),
+          Expanded(child: _buildNotesView()),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _addNote,
+        child: const Icon(Icons.add),
+        backgroundColor: Theme.of(context).primaryColor,
+      ),
+    );
+  }
+
+  Widget _buildFilterBar() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Buscar notas...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    filled: true,
+                    fillColor: Theme.of(context).cardColor,
+                  ),
+                  onChanged: (value) => _applyFiltersAndSort(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: Icon(_gridView ? Icons.list : Icons.grid_view),
+                onPressed: () => setState(() => _gridView = !_gridView),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButton<String>(
+                  value: _selectedTag,
+                  hint: const Text('Etiqueta'),
+                  items: _predefinedTags
+                      .map((tag) => DropdownMenuItem(value: tag, child: Text(tag)))
+                      .toList()
+                    ..add(const DropdownMenuItem(value: null, child: Text('Todas'))),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedTag = value;
+                      _applyFiltersAndSort();
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: _showDateRangePicker,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).primaryColor,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Rango de Fechas'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotesView() {
+    if (_filteredNotes.isEmpty) {
+      return const Center(child: Text('No hay notas disponibles.'));
+    }
+
+    return _gridView
+        ? GridView.builder(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 1.5,
+            ),
+            itemCount: _filteredNotes.length,
+            itemBuilder: (context, index) => _buildNoteCard(_filteredNotes[index]),
+          )
+        : ListView.builder(
+            itemCount: _filteredNotes.length,
+            itemBuilder: (context, index) => _buildNoteCard(_filteredNotes[index]),
+          );
+  }
+
+  Widget _buildNoteCard(Note note) {
+    return Dismissible(
+      key: Key(note.id.toString()),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        color: Colors.redAccent,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 16.0),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      onDismissed: (direction) async {
+        await DatabaseHelper.instance.deleteNote(note.id);
+        if (note.audioPath != null) {
+          await File(note.audioPath!).delete();
+        }
+        _loadNotes();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Nota eliminada'),
+            action: SnackBarAction(
+              label: 'Deshacer',
+              onPressed: () async {
+                await DatabaseHelper.instance.insertNote({
+                  'date': note.date.toIso8601String(),
+                  'content': note.content,
+                  'isCompleted': note.isCompleted ? 1 : 0,
+                  'isHandwritten': note.isHandwritten ? 1 : 0,
+                  'tags': jsonEncode(note.tags),
+                  'audioPath': note.audioPath,
+                  'isFavorite': note.isFavorite ? 1 : 0,
+                });
+                _loadNotes();
+              },
+            ),
+          ),
+        );
+      },
+      child: Card(
+        elevation: 2,
+        margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        color: note.isCompleted
+            ? Theme.of(context).cardColor.withOpacity(0.7)
+            : Theme.of(context).cardColor,
+        child: ListTile(
+          leading: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Checkbox(
+                value: note.isCompleted,
+                onChanged: (value) async {
+                  await DatabaseHelper.instance.updateNote({
+                    'id': note.id,
+                    'date': note.date.toIso8601String(),
+                    'content': note.content,
+                    'isCompleted': value! ? 1 : 0,
+                    'isHandwritten': note.isHandwritten ? 1 : 0,
+                    'tags': jsonEncode(note.tags),
+                    'audioPath': note.audioPath,
+                    'isFavorite': note.isFavorite ? 1 : 0,
+                  });
+                  _loadNotes();
+                },
+                activeColor: Theme.of(context).primaryColor,
+              ),
+              if (note.isFavorite) const Icon(Icons.star, color: Colors.yellow, size: 20),
+            ],
+          ),
+          title: note.isHandwritten
+              ? SizedBox(
+                  height: 50,
+                  child: HandSignature(
+                    control: HandSignatureControl()
+                      ..draw(SvgParser().parse(note.content)),
+                    color: Colors.black,
+                    width: 2.0,
+                  ),
+                )
+              : RichText(
+                  text: TextSpan(
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    children: _highlightSearchText(_parseContent(note.content, false)),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                DateFormat('dd/MM/yyyy HH:mm').format(note.date),
+                style: Theme.of(context).textTheme.bodyMedium!.copyWith(fontSize: 12),
+              ),
+              if (note.tags.isNotEmpty)
+                Wrap(
+                  spacing: 4.0,
+                  children: note.tags.map((tag) {
+                    return Chip(
+                      label: Text(tag, style: const TextStyle(fontSize: 10)),
+                      padding: EdgeInsets.zero,
+                    );
+                  }).toList(),
+                ),
+              if (note.audioPath != null)
+                IconButton(
+                  icon: const Icon(Icons.play_arrow, size: 20),
+                  onPressed: () => _playAudio(note.audioPath!),
+                ),
+            ],
+          ),
+          trailing: IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () => _editNote(note),
+          ),
+          onTap: () => _showNoteDetails(note),
+        ),
+      ),
+    );
+  }
+
+  List<TextSpan> _highlightSearchText(String text) {
+    if (_searchHighlight.isEmpty) {
+      return [TextSpan(text: text)];
+    }
+    final spans = <TextSpan>[];
+    int start = 0;
+    while (start < text.length) {
+      final index = text.toLowerCase().indexOf(_searchHighlight, start);
+      if (index == -1) {
+        spans.add(TextSpan(text: text.substring(start)));
+        break;
+      }
+      if (index > start) {
+        spans.add(TextSpan(text: text.substring(start, index)));
+      }
+      spans.add(
+        TextSpan(
+          text: text.substring(index, index + _searchHighlight.length),
+          style: const TextStyle(
+            backgroundColor: Colors.yellow,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
+      start = index + _searchHighlight.length;
+    }
+    return spans;
+  }
+
+  void _addQuickNote() async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Nota Rápida'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(hintText: 'Escribe una nota rápida...'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      await DatabaseHelper.instance.insertNote({
+        'date': DateTime.now().toIso8601String(),
+        'content': jsonEncode([{'insert': result + '\n'}]),
+        'isCompleted': 0,
+        'isHandwritten': 0,
+        'tags': jsonEncode([]),
+        'audioPath': null,
+        'isFavorite': 0,
+      });
+      _loadNotes();
+    }
+  }
+
+  void _addNote() async {
+    final quillController = quill.QuillController.basic();
+    final handSignatureControl = HandSignatureControl();
+    bool handwritingMode = false;
+    List<String> tags = [];
+    String? audioPath;
+    String template = 'none';
+    DateTime? reminderTime;
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => _buildNoteEditorDialog(
+        title: 'Nueva Nota',
+        quillController: quillController,
+        handSignatureControl: handSignatureControl,
+        initialHandwritingMode: handwritingMode,
+        initialTags: tags,
+        initialAudioPath: audioPath,
+        initialTemplate: template,
+        onModeChange: (mode) => handwritingMode = mode,
+        onTagsChange: (newTags) => tags = newTags,
+        onAudioChange: (path) => audioPath = path,
+        onTemplateChange: (temp) => template = temp,
+        onReminderChange: (time) => reminderTime = time,
+      ),
+    );
+
+    if (result != null) {
+      final noteId = await DatabaseHelper.instance.insertNote({
+        'date': result['date'].toIso8601String(),
+        'content': result['content'],
+        'isCompleted': 0,
+        'isHandwritten': result['isHandwritten'] ? 1 : 0,
+        'tags': jsonEncode(result['tags']),
+        'audioPath': result['audioPath'],
+        'isFavorite': 0,
+      });
+      if (reminderTime != null) {
+        await NotificationHelper.scheduleNotification(
+          id: noteId,
+          title: 'Recordatorio de Nota',
+          body: handwritingMode ? 'Nota manuscrita' : _parseContent(result['content'], false),
+          scheduledTime: reminderTime,
+        );
+      }
+      _loadNotes();
+    }
+  }
+
+  void _editNote(Note note) async {
+    final quillController = quill.QuillController(
+      document: note.isHandwritten
+          ? quill.Document()
+          : quill.Document.fromJson(jsonDecode(note.content)),
+      selection: const TextSelection.collapsed(offset: 0),
+    );
+    final handSignatureControl = HandSignatureControl();
+    if (note.isHandwritten) {
+      final svgData = note.content;
+      if (svgData.isNotEmpty) {
+        handSignatureControl.draw(SvgParser().parse(svgData));
+      }
+    }
+    bool handwritingMode = note.isHandwritten;
+    List<String> tags = List.from(note.tags);
+    String? audioPath = note.audioPath;
+    bool isFavorite = note.isFavorite;
+    DateTime? reminderTime;
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => _buildNoteEditorDialog(
+        title: 'Editar Nota',
+        quillController: quillController,
+        handSignatureControl: handSignatureControl,
+        initialHandwritingMode: handwritingMode,
+        initialTags: tags,
+        initialAudioPath: audioPath,
+        initialTemplate: 'none',
+        date: note.date,
+        onModeChange: (mode) => handwritingMode = mode,
+        onTagsChange: (newTags) => tags = newTags,
+        onAudioChange: (path) => audioPath = path,
+        onFavoriteChange: (value) => isFavorite = value,
+        isFavorite: isFavorite,
+        onReminderChange: (time) => reminderTime = time,
+      ),
+    );
+
+    if (result != null) {
+      await DatabaseHelper.instance.updateNote({
+        'id': note.id,
+        'date': result['date'].toIso8601String(),
+        'content': result['content'],
+        'isCompleted': note.isCompleted ? 1 : 0,
+        'isHandwritten': result['isHandwritten'] ? 1 : 0,
+        'tags': jsonEncode(result['tags']),
+        'audioPath': result['audioPath'],
+        'isFavorite': isFavorite ? 1 : 0,
+      });
+      // Si el audio cambió, eliminamos el antiguo
+      if (audioPath != note.audioPath && note.audioPath != null) {
+        await File(note.audioPath!).delete();
+      }
+      // Reprogramar recordatorio si lo hay
+      if (reminderTime != null) {
+        await NotificationHelper.cancelNotification(note.id);
+        await NotificationHelper.scheduleNotification(
+          id: note.id,
+          title: 'Recordatorio de Nota',
+          body: handwritingMode ? 'Nota manuscrita' : _parseContent(result['content'], false),
+          scheduledTime: reminderTime,
+        );
+      }
+      _loadNotes();
+    }
+  }
+
+  Widget _buildNoteEditorDialog({
+    required String title,
+    required quill.QuillController quillController,
+    required HandSignatureControl handSignatureControl,
+    required bool initialHandwritingMode,
+    required List<String> initialTags,
+    required String? initialAudioPath,
+    required String initialTemplate,
+    DateTime? date,
+    required ValueChanged<bool> onModeChange,
+    required ValueChanged<List<String>> onTagsChange,
+    required ValueChanged<String?> onAudioChange,
+    ValueChanged<String>? onTemplateChange,
+    bool isFavorite = false,
+    ValueChanged<bool>? onFavoriteChange,
+    ValueChanged<DateTime?>? onReminderChange,
+  }) {
+    bool handwritingMode = initialHandwritingMode;
+    List<String> tags = List.from(initialTags);
+    String? audioPath = initialAudioPath;
+    String template = initialTemplate;
+    DateTime selectedDate = date ?? DateTime.now();
+    Color penColor = Colors.black;
+    double penWidth = 2.0;
+    bool eraserMode = false;
+    DateTime? reminderTime;
+
+    return StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(title),
+            if (handwritingMode)
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  setState(() {
+                    switch (value) {
+                      case 'black':
+                        penColor = Colors.black;
+                        eraserMode = false;
+                        break;
+                      case 'blue':
+                        penColor = Colors.blue;
+                        eraserMode = false;
+                        break;
+                      case 'red':
+                        penColor = Colors.red;
+                        eraserMode = false;
+                        break;
+                      case 'width_1':
+                        penWidth = 1.0;
+                        eraserMode = false;
+                        break;
+                      case 'width_2':
+                        penWidth = 2.0;
+                        eraserMode = false;
+                        break;
+                      case 'width_4':
+                        penWidth = 4.0;
+                        eraserMode = false;
+                        break;
+                      case 'eraser':
+                        eraserMode = true;
+                        break;
+                      case 'clear':
+                        handSignatureControl.clear();
+                        break;
+                    }
+                  });
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(value: 'black', child: Text('Negro')),
+                  const PopupMenuItem(value: 'blue', child: Text('Azul')),
+                  const PopupMenuItem(value: 'red', child: Text('Rojo')),
+                  const PopupMenuItem(value: 'width_1', child: Text('Grosor 1')),
+                  const PopupMenuItem(value: 'width_2', child: Text('Grosor 2')),
+                  const PopupMenuItem(value: 'width_4', child: Text('Grosor 4')),
+                  const PopupMenuItem(value: 'eraser', child: Text('Borrador')),
+                  const PopupMenuItem(value: 'clear', child: Text('Limpiar')),
+                ],
+                icon: const Icon(Icons.brush),
+              )
+            else
+              IconButton(
+                icon: const Icon(Icons.brush),
+                onPressed: () {
+                  setState(() => handwritingMode = !handwritingMode);
+                  onModeChange(handwritingMode);
+                },
+              ),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: Column(
+            children: [
+              if (handwritingMode)
+                Expanded(
+                  child: HandSignature(
+                    control: handSignatureControl,
+                    color: eraserMode ? Colors.white : penColor,
+                    width: eraserMode ? 10.0 : penWidth,
+                  ),
+                )
+              else
+                Column(
+                  children: [
+                    // Se asume que la versión de flutter_quill admite esto.
+                    // Si no, podrías cambiar a QuillToolbar.basic(...) con showUndo, showRedo, etc.
+                    quill.QuillToolbar(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            quill.QuillToolbarHistoryButton(
+                              isUndo: true,
+                              controller: quillController,
+                            ),
+                            quill.QuillToolbarHistoryButton(
+                              isUndo: false,
+                              controller: quillController,
+                            ),
+                            quill.QuillToolbarToggleStyleButton(
+                              options: const quill.QuillToolbarToggleStyleButtonOptions(),
+                              controller: quillController,
+                              attribute: quill.Attribute.bold,
+                            ),
+                            quill.QuillToolbarToggleStyleButton(
+                              options: const quill.QuillToolbarToggleStyleButtonOptions(),
+                              controller: quillController,
+                              attribute: quill.Attribute.italic,
+                            ),
+                            quill.QuillToolbarToggleStyleButton(
+                              options: const quill.QuillToolbarToggleStyleButtonOptions(),
+                              controller: quillController,
+                              attribute: quill.Attribute.list,
+                              value: quill.Attribute.ul,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    DropdownButton<String>(
+                      value: template,
+                      hint: const Text('Plantilla'),
+                      items: const [
+                        DropdownMenuItem(value: 'none', child: Text('Ninguna')),
+                        DropdownMenuItem(value: 'todo', child: Text('Lista de Tareas')),
+                        DropdownMenuItem(value: 'meeting', child: Text('Resumen de Reunión')),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          template = value!;
+                          if (value == 'todo') {
+                            quillController.document = quill.Document.fromJson([
+                              {'insert': 'Lista de Tareas\n'},
+                              {
+                                'insert': '- Tarea 1\n',
+                                'attributes': {'list': 'bullet'}
+                              },
+                              {
+                                'insert': '- Tarea 2\n',
+                                'attributes': {'list': 'bullet'}
+                              }
+                            ]);
+                          } else if (value == 'meeting') {
+                            quillController.document = quill.Document.fromJson([
+                              {
+                                'insert': 'Resumen de Reunión\n',
+                                'attributes': {'bold': true}
+                              },
+                              {'insert': 'Fecha: \n'},
+                              {'insert': 'Participantes: \n'},
+                              {'insert': 'Notas: \n'},
+                            ]);
+                          } else {
+                            quillController.document = quill.Document();
+                          }
+                          onTemplateChange?.call(value);
+                        });
+                      },
+                    ),
+                    Expanded(
+                      child: quill.QuillEditor(
+                        controller: quillController,
+                        scrollController: ScrollController(),
+                        focusNode: FocusNode(),
+                        readOnly: false,
+                        expands: true,
+                        padding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 4.0,
+                children: tags
+                    .map((tag) => Chip(
+                          label: Text(tag),
+                          deleteIcon: const Icon(Icons.close, size: 16),
+                          onDeleted: () {
+                            setState(() {
+                              tags.remove(tag);
+                              onTagsChange(tags);
+                            });
+                          },
+                        ))
+                    .toList(),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  ElevatedButton(
+                    onPressed: () => _addTag(setState, tags, onTagsChange),
+                    child: const Text('Añadir Etiqueta'),
+                  ),
+                  const Spacer(),
+                  if (audioPath != null)
+                    IconButton(
+                      icon: const Icon(Icons.play_circle),
+                      onPressed: () => _playAudio(audioPath!),
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.mic),
+                    onPressed: () async {
+                      final path = await _recordAudio();
+                      if (path != null) {
+                        setState(() {
+                          audioPath = path;
+                          onAudioChange(audioPath);
+                        });
+                      }
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () async {
+                  final time = await _showDateTimePicker(selectedDate);
+                  setState(() {
+                    reminderTime = time;
+                    onReminderChange?.call(time);
+                  });
+                },
+                child: Text(
+                  reminderTime != null
+                      ? 'Recordatorio: ${DateFormat('dd/MM/yyyy HH:mm').format(reminderTime!)}'
+                      : 'Añadir Recordatorio',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          if (onFavoriteChange != null)
+            IconButton(
+              icon: Icon(isFavorite ? Icons.star : Icons.star_border),
+              onPressed: () {
+                setState(() {
+                  isFavorite = !isFavorite;
+                  onFavoriteChange(isFavorite);
+                });
+              },
+            ),
+          TextButton(
+            onPressed: () async {
+              selectedDate = (await _showDateTimePicker(selectedDate)) ?? selectedDate;
+              setState(() {});
+            },
+            child: Text('Fecha: ${DateFormat('dd/MM/yyyy HH:mm').format(selectedDate)}'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final content = handwritingMode
+                  ? await handSignatureControl.toSvg()
+                  : jsonEncode(quillController.document.toDelta().toJson());
+              if (content != null && content.isNotEmpty) {
+                Navigator.pop(context, {
+                  'content': content,
+                  'date': selectedDate,
+                  'isHandwritten': handwritingMode,
+                  'tags': tags,
+                  'audioPath': audioPath,
+                });
+              }
+            },
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _addTag(
+    void Function(void Function()) setState,
+    List<String> tags,
+    void Function(List<String>) onTagsChange,
+  ) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Añadir Etiqueta'),
+        content: DropdownButton<String>(
+          value: controller.text.isEmpty ? null : controller.text,
+          hint: const Text('Selecciona o escribe una etiqueta'),
+          isExpanded: true,
+          items: _predefinedTags
+              .where((tag) => !tags.contains(tag))
+              .map((tag) => DropdownMenuItem(value: tag, child: Text(tag)))
+              .toList(),
+          onChanged: (value) {
+            if (value != null) {
+              controller.text = value;
+            }
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () {
+              if (controller.text.isNotEmpty && !tags.contains(controller.text)) {
+                setState(() {
+                  tags.add(controller.text);
+                  onTagsChange(tags);
+                });
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('Añadir'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<String?> _recordAudio() async {
+    // Placeholder de ejemplo: en producción usarías una librería real, p. ej. `flutter_sound`.
+    final directory = await getTemporaryDirectory();
+    final path = '${directory.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await File(path).writeAsBytes([]);
+    return path;
+  }
+
+  void _playAudio(String path) async {
+    await _audioPlayer.play(DeviceFileSource(path));
+  }
+
+  void _showNoteDetails(Note note) {
+    final quillController = quill.QuillController(
+      document: note.isHandwritten
+          ? quill.Document()
+          : quill.Document.fromJson(jsonDecode(note.content)),
+      selection: const TextSelection.collapsed(offset: 0),
+    );
+    final handSignatureControl = HandSignatureControl();
+    if (note.isHandwritten) {
+      final svgData = note.content;
+      if (svgData.isNotEmpty) {
+        handSignatureControl.draw(SvgParser().parse(svgData));
+      }
+    }
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (note.isHandwritten)
+              SizedBox(
+                height: 200,
+                child: HandSignature(
+                  control: handSignatureControl,
+                  color: Colors.black,
+                  width: 2.0,
+                ),
+              )
+            else
+              quill.QuillEditor(
+                controller: quillController,
+                scrollController: ScrollController(),
+                focusNode: FocusNode(),
+                readOnly: true,
+                expands: false,
+                padding: EdgeInsets.zero,
+              ),
+            const SizedBox(height: 8),
+            Text(
+              'Creada: ${DateFormat('dd/MM/yyyy HH:mm').format(note.date)}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            if (note.tags.isNotEmpty)
+              Wrap(
+                spacing: 4.0,
+                children: note.tags.map((tag) => Chip(label: Text(tag))).toList(),
+              ),
+            if (note.audioPath != null)
+              IconButton(
+                icon: const Icon(Icons.play_arrow),
+                onPressed: () => _playAudio(note.audioPath!),
+              ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildActionButton(
+                  icon: Icons.edit,
+                  label: 'Editar',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _editNote(note);
+                  },
+                ),
+                _buildActionButton(
+                  icon: Icons.share,
+                  label: 'Compartir',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _exportNote(note);
+                  },
+                ),
+                _buildActionButton(
+                  icon: Icons.delete,
+                  label: 'Eliminar',
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await DatabaseHelper.instance.deleteNote(note.id);
+                    if (note.audioPath != null) {
+                      await File(note.audioPath!).delete();
+                    }
+                    _loadNotes();
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          CircleAvatar(
+            radius: 24,
+            backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+            child: Icon(icon, color: Theme.of(context).primaryColor),
+          ),
+          const SizedBox(height: 4),
+          Text(label, style: Theme.of(context).textTheme.bodyMedium),
+        ],
+      ),
+    );
+  }
+
+  void _showSortOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.date_range),
+              title: const Text('Ordenar por Fecha'),
+              trailing: _sortCriteria == 'date'
+                  ? Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward)
+                  : null,
+              onTap: () {
+                setState(() {
+                  if (_sortCriteria == 'date') {
+                    _sortAscending = !_sortAscending;
+                  } else {
+                    _sortCriteria = 'date';
+                    _sortAscending = true;
+                  }
+                  _applyFiltersAndSort();
+                });
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.text_fields),
+              title: const Text('Ordenar por Contenido'),
+              trailing: _sortCriteria == 'content'
+                  ? Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward)
+                  : null,
+              onTap: () {
+                setState(() {
+                  if (_sortCriteria == 'content') {
+                    _sortAscending = !_sortAscending;
+                  } else {
+                    _sortCriteria = 'content';
+                    _sortAscending = true;
+                  }
+                  _applyFiltersAndSort();
+                });
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle),
+              title: const Text('Ordenar por Completado'),
+              trailing: _sortCriteria == 'completed'
+                  ? Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward)
+                  : null,
+              onTap: () {
+                setState(() {
+                  if (_sortCriteria == 'completed') {
+                    _sortAscending = !_sortAscending;
+                  } else {
+                    _sortCriteria = 'completed';
+                    _sortAscending = true;
+                  }
+                  _applyFiltersAndSort();
+                });
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDateRangePicker() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2050),
+      initialDateRange: _startDateFilter != null && _endDateFilter != null
+          ? DateTimeRange(start: _startDateFilter!, end: _endDateFilter!)
+          : null,
+    );
+    if (picked != null) {
+      setState(() {
+        _startDateFilter = picked.start;
+        _endDateFilter = picked.end;
+        _applyFiltersAndSort();
+      });
+    }
+  }
+
+  Future<DateTime?> _showDateTimePicker(DateTime initialDate) async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2050),
+    );
+    if (date != null) {
+      final time = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(initialDate),
+      );
+      if (time != null) {
+        return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      }
+    }
+    return null;
+  }
+
+  Future<void> _exportNote(Note note) async {
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.Page(
+        build: (pw.Context context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              'Nota: ${DateFormat('dd/MM/yyyy HH:mm').format(note.date)}',
+              style: const pw.TextStyle(fontSize: 24),
+            ),
+            pw.SizedBox(height: 20),
+            if (note.isHandwritten)
+              pw.Text('Nota manuscrita (ver SVG adjunto)')
+            else
+              pw.Text(_parseContent(note.content, false)),
+            pw.SizedBox(height: 20),
+            pw.Text('Etiquetas: ${note.tags.join(', ')}'),
+            if (note.audioPath != null) pw.Text('Audio incluido'),
+          ],
+        ),
+      ),
+    );
+
+    final directory = await getTemporaryDirectory();
+    final file = File('${directory.path}/note_${note.id}.pdf');
+    await file.writeAsBytes(await pdf.save());
+    await Share.shareXFiles(
+      [XFile(file.path)],
+      text: 'Nota del ${DateFormat('dd/MM/yyyy').format(note.date)}',
+    );
+  }
+
+  Future<void> _exportAllNotes() async {
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.MultiPage(
+        build: (pw.Context context) => [
+          pw.Text('Todas las Notas', style: const pw.TextStyle(fontSize: 24)),
+          pw.SizedBox(height: 20),
+          ..._filteredNotes.map(
+            (note) => pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('Fecha: ${DateFormat('dd/MM/yyyy HH:mm').format(note.date)}'),
+                pw.Text('Contenido: ${note.isHandwritten ? 'Nota manuscrita' : _parseContent(note.content, false)}'),
+                pw.Text('Etiquetas: ${note.tags.join(', ')}'),
+                if (note.audioPath != null) pw.Text('Audio incluido'),
+                pw.SizedBox(height: 10),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    final directory = await getTemporaryDirectory();
+    final file = File('${directory.path}/all_notes_${DateTime.now().millisecondsSinceEpoch}.pdf');
+    await file.writeAsBytes(await pdf.save());
+    await Share.shareXFiles(
+      [XFile(file.path)],
+      text: 'Exportación de todas las notas',
+    );
+  }
+}
+
+
+
+6.lib/notification_helper.dart
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:calendar_app/database_helper.dart';
+import 'dart:async';
+
+class NotificationHelper {
+  static final NotificationHelper _instance = NotificationHelper._init();
+  static final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+  static const int _inactivityNotificationId = 9999;
+
+  factory NotificationHelper() => _instance;
+
+  NotificationHelper._init();
+
+  static Future<void> init() async {
+    tz.initializeTimeZones();
+
+    const AndroidInitializationSettings androidSettings =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    final InitializationSettings initializationSettings =
+        InitializationSettings(android: androidSettings);
+
+    await _notifications.initialize(
+      initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) async {
+        if (response.actionId == 'snooze') {
+          if (response.notificationId != null) {
+            await _snoozeNotification(response.notificationId!);
+          }
+        } else if (response.actionId == 'open') {
+          // Aquí podrías hacer que la app abra cierta pantalla
+          print('Abrir notificación: ${response.payload}');
+        }
+      },
+    );
+
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      'smart_calendar_channel',
+      'Smart Calendar Notifications',
+      description: 'Notificaciones para eventos, metas y notas',
+      importance: Importance.max,
+      playSound: true,
+      enableVibration: true,
+      showBadge: true,
+    );
+
+    await _notifications
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
+
+    // Programar chequeo de inactividad
+    _scheduleInactivityCheck();
+  }
+
+  static Future<void> scheduleNotification({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime scheduledTime,
+    String? recurrence, // 'daily', 'weekly', 'monthly', null
+    String? sound,
+    String? payload,
+    bool silent = false, // Modo silencioso
+  }) async {
+    final tzScheduledTime = tz.TZDateTime.from(scheduledTime, tz.local);
+    final prefs = await SharedPreferences.getInstance();
+
+    // Si silent es true, se desactiva vibración y sonido.
+    final enableVibration = silent ? false : (prefs.getBool('notificationVibration') ?? true);
+    final notificationSound = silent ? null : (sound ?? prefs.getString('notificationSound'));
+
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'smart_calendar_channel',
+      'Smart Calendar Notifications',
+      importance: Importance.max,
+      priority: Priority.high,
+      ticker: 'ticker',
+      sound: notificationSound != null && notificationSound != 'default'
+          ? RawResourceAndroidNotificationSound(notificationSound)
+          : null,
+      playSound: !silent,
+      enableVibration: enableVibration,
+      styleInformation: const BigTextStyleInformation(''),
+      actions: [
+        const AndroidNotificationAction('open', 'Abrir'),
+        const AndroidNotificationAction('snooze', 'Posponer 10 min'),
+      ],
+    );
+
+    // Aquí usamos la misma configuración para iOS/macOS si fuera necesario
+    const NotificationDetails notificationDetails = NotificationDetails(android: androidDetails);
+
+    if (recurrence == null) {
+      // Notificación única
+      await _notifications.zonedSchedule(
+        id,
+        title,
+        body,
+        tzScheduledTime,
+        notificationDetails,
+        androidAllowWhileIdle: true,
+        payload: payload,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    } else {
+      // Notificación recurrente (daily, weekly, monthly)
+      await _scheduleRecurringNotification(
+        id: id,
+        title: title,
+        body: body,
+        startTime: tzScheduledTime,
+        recurrence: recurrence,
+        notificationDetails: notificationDetails,
+        silent: silent,
+      );
+    }
+  }
+
+  static Future<void> _scheduleRecurringNotification({
+    required int id,
+    required String title,
+    required String body,
+    required tz.TZDateTime startTime,
+    required String recurrence,
+    required NotificationDetails notificationDetails,
+    bool silent = false,
+  }) async {
+    final now = tz.TZDateTime.now(tz.local);
+
+    // Definimos el intervalo en función de la recurrencia
+    final Duration interval;
+    switch (recurrence) {
+      case 'daily':
+        interval = const Duration(days: 1);
+        break;
+      case 'weekly':
+        interval = const Duration(days: 7);
+        break;
+      case 'monthly':
+        // Aproximación de 30 días
+        interval = const Duration(days: 30);
+        break;
+      default:
+        return;
+    }
+
+    // Programamos por ejemplo 12 notificaciones (un año de mensual, 12 semanas, etc.)
+    for (int i = 0; i < 12; i++) {
+      final scheduledTime = startTime.add(interval * i);
+      if (scheduledTime.isAfter(now)) {
+        await _notifications.zonedSchedule(
+          id + i,
+          title,
+          body,
+          scheduledTime,
+          notificationDetails,
+          androidAllowWhileIdle: true,
+          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+        );
+      }
+    }
+  }
+
+  static Future<void> _snoozeNotification(int id) async {
+    // Buscamos la notificación pendiente con ese ID
+    final pending = await _notifications.pendingNotificationRequests();
+    final notification = pending.firstWhere(
+      (n) => n.id == id,
+      orElse: () => PendingNotificationRequest(
+        // Ajuste: el constructor de PendingNotificationRequest no usa parámetros con nombre
+        id,
+        '',
+        '',
+        null,
+      ),
+    );
+
+    // Cancelamos la notificación actual y la reprogramamos 10 minutos después
+    if (notification.title != null) {
+      await _notifications.cancel(id);
+      final newTime = tz.TZDateTime.now(tz.local).add(const Duration(minutes: 10));
+      await scheduleNotification(
+        id: id,
+        title: notification.title!,
+        body: notification.body ?? '',
+        scheduledTime: newTime,
+      );
+    }
+  }
+
+  static Future<void> showInstantNotification({
+    required String title,
+    required String body,
+    String? sound,
+    bool silent = false,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    // Manejamos la vibración y sonido
+    final enableVibration = silent ? false : (prefs.getBool('notificationVibration') ?? true);
+    final notificationSound = silent ? null : (sound ?? prefs.getString('notificationSound'));
+
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'smart_calendar_channel',
+      'Smart Calendar Notifications',
+      importance: Importance.max,
+      priority: Priority.high,
+      sound: notificationSound != null && notificationSound != 'default'
+          ? RawResourceAndroidNotificationSound(notificationSound)
+          : null,
+      playSound: !silent,
+      enableVibration: enableVibration,
+    );
+
+    const NotificationDetails notificationDetails = NotificationDetails(android: androidDetails);
+
+    await _notifications.show(
+      0,
+      title,
+      body,
+      notificationDetails,
+    );
+  }
+
+  static Future<void> cancelNotification(int id) async {
+    await _notifications.cancel(id);
+  }
+
+  static Future<void> cancelAllNotifications() async {
+    await _notifications.cancelAll();
+  }
+
+  static Future<List<PendingNotificationRequest>> getPendingNotifications() async {
+    return await _notifications.pendingNotificationRequests();
+  }
+
+  static Future<void> checkGoalNotification(int year, double currentHours) async {
+    final db = DatabaseHelper.instance;
+    final goal = await db.getGoal(year);
+    final monthlyGoal = goal / 12;
+    final percentage = currentHours / monthlyGoal;
+    final prefs = await SharedPreferences.getInstance();
+    final language = prefs.getString('language') ?? 'es';
+
+    // Evitar null en getBool
+    final notified50 = prefs.getBool('notified_50_$year') ?? false;
+    final notified75 = prefs.getBool('notified_75_$year') ?? false;
+
+    // 50% de la meta
+    if (percentage >= 0.5 && percentage < 0.75 && !notified50) {
+      await showInstantNotification(
+        title: language == 'es' ? '¡50% de tu meta mensual!' : '50% of your monthly goal!',
+        body: language == 'es'
+            ? 'Has alcanzado el ${ (percentage * 100).toStringAsFixed(0) }% de tu meta de $monthlyGoal horas este mes.'
+            : 'You’ve reached ${ (percentage * 100).toStringAsFixed(0) }% of your $monthlyGoal hours goal this month.',
+        sound: 'alert',
+      );
+      await prefs.setBool('notified_50_$year', true);
+    }
+    // 75% de la meta
+    else if (percentage >= 0.75 && percentage < 1.0 && !notified75) {
+      await showInstantNotification(
+        title: language == 'es' ? '¡75% de tu meta mensual!' : '75% of your monthly goal!',
+        body: language == 'es'
+            ? 'Has alcanzado el ${ (percentage * 100).toStringAsFixed(0) }% de tu meta de $monthlyGoal horas este mes.'
+            : 'You’ve reached ${ (percentage * 100).toStringAsFixed(0) }% of your $monthlyGoal hours goal this month.',
+        sound: 'alert',
+      );
+      await prefs.setBool('notified_75_$year', true);
+    }
+  }
+
+  static Future<void> _scheduleInactivityCheck() async {
+    // Revisa inactividad una vez al día
+    Timer.periodic(const Duration(days: 1), (timer) async {
+      final db = DatabaseHelper.instance;
+      final now = DateTime.now();
+      final lastWeek = now.subtract(const Duration(days: 7));
+      final recentEvents = await db.getEventsByPeriod(lastWeek, now);
+
+      final prefs = await SharedPreferences.getInstance();
+      final language = prefs.getString('language') ?? 'es';
+      // Evitamos null
+      final wasNotified = prefs.getBool('inactivity_notified_$now') ?? false;
+
+      if (recentEvents.isEmpty && !wasNotified) {
+        await showInstantNotification(
+          title: language == 'es' ? '¡Sin actividad reciente!' : 'No recent activity!',
+          body: language == 'es'
+              ? 'No has registrado horas en los últimos 7 días.'
+              : 'You haven’t logged any hours in the last 7 days.',
+        );
+        await prefs.setBool('inactivity_notified_$now', true);
+      }
+    });
+  }
+
+  static Future<void> scheduleSilentReminder({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime scheduledTime,
+  }) async {
+    await scheduleNotification(
+      id: id,
+      title: title,
+      body: body,
+      scheduledTime: scheduledTime,
+      silent: true,
+    );
+  }
+}
+
+
+
+7.lib/report_screen.dart
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:calendar_app/database_helper.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class ReportScreen extends StatefulWidget {
+  const ReportScreen({Key? key}) : super(key: key);
+
+  @override
+  _ReportScreenState createState() => _ReportScreenState();
+}
+
+class _ReportScreenState extends State<ReportScreen> {
+  int _selectedYear = DateTime.now().year;
+  String _viewMode = 'year'; // 'year', 'week'
+  DateTime _selectedWeekStart = DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1));
+  Map<DateTime, double> _periodHours = {};
+  Map<String, double> _categoryTotals = {};
+  double _totalHours = 0.0;
+  double _remainingHours = 600.0;
+  double _carryOver = 0.0;
+  double _goalHours = 600.0;
+  String _reportNotes = '';
+  Map<DateTime, String> _monthlyNotes = {};
+  bool _showDetails = false;
+  bool _comparePrevious = false;
+  Map<DateTime, double> _previousPeriodHours = {};
+  String? _selectedTag;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReport(_selectedYear);
+  }
+
+  Future<void> _loadReport(int year) async {
+    final startDate = _viewMode == 'year'
+        ? DateTime(year - 1, 9, 1)
+        : _selectedWeekStart;
+    final endDate = _viewMode == 'year'
+        ? DateTime(year, 8, 31)
+        : _selectedWeekStart.add(const Duration(days: 6));
+
+    final events = await DatabaseHelper.instance.getEventsByPeriod(startDate, endDate);
+    final prefs = await SharedPreferences.getInstance();
+    _goalHours = prefs.getDouble('goalHours') ?? 600.0;
+
+    setState(() {
+      _periodHours = {};
+      _categoryTotals = {};
+      for (var event in events) {
+        final date = DateTime.parse(event['date']);
+        final key = _viewMode == 'year'
+            ? DateTime(date.year, date.month, 1)
+            : date;
+
+        if (_selectedTag == null || event['category'] == _selectedTag) {
+          _periodHours[key] = (_periodHours[key] ?? 0.0) +
+              ((event['hours'] as num?)?.toDouble() ?? 0.0);
+
+          final category = event['category'] as String;
+          _categoryTotals[category] = (_categoryTotals[category] ?? 0.0) +
+              ((event['hours'] as num?)?.toDouble() ?? 0.0);
+        }
+      }
+
+      _totalHours = _periodHours.values.fold(0.0, (sum, hours) => sum + hours);
+      _remainingHours = _goalHours - _totalHours;
+      _carryOver = _calculateCarryOver();
+      _reportNotes = prefs.getString('reportNotes_$_selectedYear') ?? '';
+      _loadMonthlyNotes();
+
+      if (_comparePrevious && _viewMode == 'year') {
+        _loadPreviousPeriod(year - 1);
+      }
+    });
+  }
+
+  Future<void> _loadPreviousPeriod(int previousYear) async {
+    final startDate = DateTime(previousYear - 1, 9, 1);
+    final endDate = DateTime(previousYear, 8, 31);
+    final events = await DatabaseHelper.instance.getEventsByPeriod(startDate, endDate);
+
+    setState(() {
+      _previousPeriodHours = {};
+      for (var event in events) {
+        final date = DateTime.parse(event['date']);
+        final key = DateTime(date.year, date.month, 1);
+        if (_selectedTag == null || event['category'] == _selectedTag) {
+          _previousPeriodHours[key] = (_previousPeriodHours[key] ?? 0.0) +
+              ((event['hours'] as num?)?.toDouble() ?? 0.0);
+        }
+      }
+    });
+  }
+
+  Future<void> _loadMonthlyNotes() async {
+    final prefs = await SharedPreferences.getInstance();
+    _monthlyNotes = {};
+    for (int month = 1; month <= 12; month++) {
+      final key = 'monthlyNote_${_selectedYear}_$month';
+      _monthlyNotes[DateTime(_selectedYear, month, 1)] =
+          prefs.getString(key) ?? '';
+    }
+  }
+
+  double _calculateCarryOver() {
+    double carryOver = 0.0;
+    for (var hours in _periodHours.values) {
+      // Ejemplo: si hay límite de 50 horas mensuales
+      if (_viewMode == 'year' && hours > 50) {
+        carryOver += hours - 50;
+      }
+    }
+    return carryOver;
+  }
+
+  Future<double> _getWeekHours() async {
+    final now = DateTime.now();
+    final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+    final endOfWeek = startOfWeek.add(const Duration(days: 6));
+    final events = await DatabaseHelper.instance.getEventsByPeriod(startOfWeek, endOfWeek);
+
+    return events.fold(
+      0.0,
+      (sum, event) => sum + ((event['hours'] as num?)?.toDouble() ?? 0.0),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Informes', style: TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.filter_alt),
+            onPressed: _showFilterOptions,
+          ),
+          IconButton(
+            icon: Icon(_showDetails ? Icons.visibility_off : Icons.visibility),
+            onPressed: () => setState(() => _showDetails = !_showDetails),
+          ),
+          IconButton(
+            icon: const Icon(Icons.download),
+            onPressed: _exportReport,
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            _buildWeekSummary(),
+            _buildSummary(),
+            _buildCategoryBreakdown(),
+            _buildPeriodDetails(),
+            _buildTrends(),
+            if (_carryOver > 0) _buildCarryOverCard(),
+            _buildReportNotes(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWeekSummary() {
+    return FutureBuilder<double>(
+      future: _getWeekHours(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const SizedBox.shrink();
+        final weekHours = snapshot.data!;
+        return Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Card(
+            elevation: 2,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Horas esta semana', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text('${weekHours.toStringAsFixed(2)} h', style: const TextStyle(fontSize: 18)),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSummary() {
+    final progress = _totalHours / _goalHours;
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        color: Theme.of(context).cardColor,
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            children: [
+              Text(
+                _viewMode == 'year'
+                    ? 'Año ${_selectedYear - 1}-$_selectedYear (Sep-Ago)'
+                    : 'Semana del ${DateFormat('dd/MM').format(_selectedWeekStart)} al ${DateFormat('dd/MM').format(_selectedWeekStart.add(const Duration(days: 6)))}',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildSummaryItem(
+                    label: 'Total Horas',
+                    value: _totalHours.toStringAsFixed(2),
+                    color: Colors.blueAccent,
+                  ),
+                  _buildSummaryItem(
+                    label: 'Restantes',
+                    value: _remainingHours.toStringAsFixed(2),
+                    color: _remainingHours >= 0 ? Colors.green : Colors.redAccent,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              LinearProgressIndicator(
+                value: progress > 1 ? 1 : progress,
+                backgroundColor: Theme.of(context).dividerColor,
+                valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).primaryColor),
+              ),
+              const SizedBox(height: 8),
+              Text('${(progress * 100).toStringAsFixed(1)}% de la meta ($_goalHours h)'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryItem({required String label, required String value, required Color color}) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color),
+        ),
+        const SizedBox(height: 4),
+        Text(label, style: Theme.of(context).textTheme.bodyMedium),
+      ],
+    );
+  }
+
+  Widget _buildCategoryBreakdown() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text('Horas por Categoría', style: Theme.of(context).textTheme.headlineMedium),
+            ),
+            ..._categoryTotals.entries.map((entry) => ListTile(
+                  title: Text(entry.key),
+                  trailing: Text('${entry.value.toStringAsFixed(2)} h'),
+                  leading: Icon(Icons.circle, color: _getCategoryColor(entry.key), size: 12),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _getCategoryColor(String category) {
+    const colors = {
+      'Predicación': Colors.green,
+      'Reuniones': Colors.blue,
+      'Personal': Colors.orange,
+      'Otros': Colors.grey,
+    };
+    return colors[category] ?? Colors.grey;
+  }
+
+  Widget _buildPeriodDetails() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: ExpansionTile(
+          title: Text(
+            _viewMode == 'year' ? 'Detalles por Mes' : 'Detalles por Día',
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
+          children: _periodHours.entries.map((entry) {
+            final previousHours = _previousPeriodHours[entry.key] ?? 0.0;
+            final monthlyNote = _monthlyNotes[entry.key] ?? '';
+            return ListTile(
+              title: Text(
+                _viewMode == 'year'
+                    ? DateFormat('MMMM yyyy').format(entry.key)
+                    : DateFormat('dd/MM/yyyy').format(entry.key),
+              ),
+              subtitle: monthlyNote.isNotEmpty
+                  ? Text(monthlyNote, maxLines: 1, overflow: TextOverflow.ellipsis)
+                  : null,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${entry.value.toStringAsFixed(2)} h'),
+                  if (_comparePrevious && _viewMode == 'year')
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8.0),
+                      child: Text(
+                        '(${entry.value - previousHours >= 0 ? '+' : ''}${(entry.value - previousHours).toStringAsFixed(2)})',
+                        style: TextStyle(
+                          color: entry.value - previousHours >= 0 ? Colors.green : Colors.red,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              onTap: _showDetails ? () => _showPeriodDetails(entry.key) : null,
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTrends() {
+    if (_viewMode != 'year') return const SizedBox.shrink();
+    final averageHours = _totalHours / 12;
+    final maxMonth = _periodHours.entries.fold<MapEntry<DateTime, double>>(
+      MapEntry(DateTime.now(), 0.0),
+      (prev, curr) => curr.value > prev.value ? curr : prev,
+    );
+    final minMonth = _periodHours.entries.fold<MapEntry<DateTime, double>>(
+      MapEntry(DateTime.now(), double.infinity),
+      (prev, curr) => curr.value < prev.value ? curr : prev,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Tendencias', style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 8),
+              Text('Promedio mensual: ${averageHours.toStringAsFixed(2)} h'),
+              Text('Mes más activo: ${DateFormat('MMMM').format(maxMonth.key)} (${maxMonth.value.toStringAsFixed(2)} h)'),
+              Text('Mes menos activo: ${DateFormat('MMMM').format(minMonth.key)} (${minMonth.value.toStringAsFixed(2)} h)'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCarryOverCard() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        color: Colors.orange[100],
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            children: [
+              const Icon(Icons.warning, color: Colors.orange),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  'Horas sobrantes: ${_carryOver.toStringAsFixed(2)} h\nSe trasladan al siguiente período.',
+                  style: const TextStyle(fontSize: 16, color: Colors.black87),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReportNotes() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Se elimina la llave sobrante al final de la cadena
+              Text(
+                'Notas del Informe ${_selectedYear - 1}-$_selectedYear',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: TextEditingController(text: _reportNotes),
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  hintText: 'Añade notas sobre este período...',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (value) async {
+                  _reportNotes = value;
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('reportNotes_$_selectedYear', value);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showFilterOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.calendar_today),
+                title: const Text('Vista Anual'),
+                onTap: () {
+                  setState(() {
+                    _viewMode = 'year';
+                    _loadReport(_selectedYear);
+                  });
+                  Navigator.pop(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.calendar_view_week),
+                title: const Text('Vista Semanal'),
+                onTap: () {
+                  setState(() {
+                    _viewMode = 'week';
+                    _loadReport(_selectedYear);
+                  });
+                  Navigator.pop(context);
+                },
+              ),
+              if (_viewMode == 'week')
+                ListTile(
+                  leading: const Icon(Icons.arrow_back),
+                  title: const Text('Semana Anterior'),
+                  onTap: () {
+                    setState(() {
+                      _selectedWeekStart = _selectedWeekStart.subtract(const Duration(days: 7));
+                      _loadReport(_selectedYear);
+                    });
+                    Navigator.pop(context);
+                  },
+                ),
+              if (_viewMode == 'week')
+                ListTile(
+                  leading: const Icon(Icons.arrow_forward),
+                  title: const Text('Semana Siguiente'),
+                  onTap: () {
+                    setState(() {
+                      _selectedWeekStart = _selectedWeekStart.add(const Duration(days: 7));
+                      _loadReport(_selectedYear);
+                    });
+                    Navigator.pop(context);
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.compare),
+                title: const Text('Comparar con Año Anterior'),
+                trailing: Switch(
+                  value: _comparePrevious,
+                  onChanged: (value) {
+                    setState(() {
+                      _comparePrevious = value;
+                      _loadReport(_selectedYear);
+                    });
+                  },
+                ),
+                onTap: () {},
+              ),
+              ListTile(
+                leading: const Icon(Icons.label),
+                title: const Text('Filtrar por Etiqueta'),
+                trailing: DropdownButton<String>(
+                  value: _selectedTag,
+                  hint: const Text('Todas'),
+                  items: ['Predicación', 'Reuniones', 'Personal', 'Otros']
+                      .map((tag) => DropdownMenuItem(value: tag, child: Text(tag)))
+                      .toList()
+                    ..add(const DropdownMenuItem(value: null, child: Text('Todas'))),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedTag = value;
+                      _loadReport(_selectedYear);
+                    });
+                  },
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.calendar_today),
+                title: const Text('Cambiar Año'),
+                onTap: () {
+                  _showYearPicker();
+                  Navigator.pop(context);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showYearPicker() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(10, (index) {
+            final year = DateTime.now().year - 5 + index;
+            return ListTile(
+              title: Text('$year-${year + 1}'),
+              trailing: _selectedYear == year ? const Icon(Icons.check) : null,
+              onTap: () {
+                setState(() {
+                  _selectedYear = year;
+                  _loadReport(year);
+                });
+                Navigator.pop(context);
+              },
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  void _showPeriodDetails(DateTime period) async {
+    final events = _viewMode == 'year'
+        ? await DatabaseHelper.instance.getEventsByMonth(period)
+        : await DatabaseHelper.instance.getEventsByDate(DateFormat('yyyy-MM-dd').format(period));
+
+    final monthlyNote = _monthlyNotes[period] ?? '';
+    final noteController = TextEditingController(text: monthlyNote);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          _viewMode == 'year'
+              ? DateFormat('MMMM yyyy').format(period)
+              : DateFormat('dd/MM/yyyy').format(period),
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Horas registradas: ${_periodHours[period]!.toStringAsFixed(2)} h',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 8),
+              if (_viewMode == 'year')
+                TextField(
+                  controller: noteController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    hintText: 'Nota para este mes...',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (value) async {
+                    _monthlyNotes[period] = value;
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString('monthlyNote_${_selectedYear}_${period.month}', value);
+                  },
+                ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 200,
+                width: double.maxFinite,
+                child: ListView.builder(
+                  itemCount: events.length,
+                  itemBuilder: (context, index) {
+                    final event = events[index];
+                    return ListTile(
+                      title: Text(event['title']),
+                      subtitle: Text(
+                        '${(event['hours'] as num?)?.toDouble() ?? 0.0}h - ${event['category']}',
+                      ),
+                      trailing: event['note'] != null ? const Icon(Icons.note) : null,
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _exportReport() async {
+    final pdf = pw.Document();
+    final startDate = _viewMode == 'year'
+        ? DateTime(_selectedYear - 1, 9, 1)
+        : _selectedWeekStart;
+    final endDate = _viewMode == 'year'
+        ? DateTime(_selectedYear, 8, 31)
+        : _selectedWeekStart.add(const Duration(days: 6));
+    final events = await DatabaseHelper.instance.getEventsByPeriod(startDate, endDate);
+
+    pdf.addPage(
+      pw.Page(
+        build: (pw.Context context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              _viewMode == 'year'
+                  ? 'Informe Anual ${_selectedYear - 1}-$_selectedYear'
+                  : 'Informe Semanal ${DateFormat('dd/MM').format(_selectedWeekStart)}-${DateFormat('dd/MM').format(endDate)}',
+              style: const pw.TextStyle(fontSize: 24),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text('Total Horas: $_totalHours h'),
+            pw.Text('Meta: $_goalHours h'),
+            pw.Text('Restantes: $_remainingHours h'),
+            if (_carryOver > 0) pw.Text('Horas sobrantes: $_carryOver h'),
+            pw.SizedBox(height: 20),
+            pw.Text('Desglose por Categoría:', style: const pw.TextStyle(fontSize: 18)),
+            ..._categoryTotals.entries.map((e) => pw.Text('${e.key}: ${e.value.toStringAsFixed(2)} h')),
+            pw.SizedBox(height: 20),
+            pw.Text('Eventos:', style: const pw.TextStyle(fontSize: 18)),
+            pw.Table.fromTextArray(
+              headers: ['Fecha', 'Título', 'Horas', 'Categoría', 'Nota'],
+              data: events.map((event) => [
+                DateFormat('dd/MM/yyyy').format(DateTime.parse(event['date'])),
+                event['title'],
+                ((event['hours'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2),
+                event['category'],
+                event['note'] ?? '',
+              ]).toList(),
+            ),
+            if (_reportNotes.isNotEmpty || _monthlyNotes.values.any((note) => note.isNotEmpty)) ...[
+              pw.SizedBox(height: 20),
+              pw.Text('Notas:', style: const pw.TextStyle(fontSize: 18)),
+              if (_reportNotes.isNotEmpty) pw.Text('Año: $_reportNotes'),
+              if (_viewMode == 'year')
+                ..._monthlyNotes.entries
+                    .where((entry) => entry.value.isNotEmpty)
+                    .map((entry) => pw.Text('${DateFormat('MMMM').format(entry.key)}: ${entry.value}')),
+            ],
+          ],
+        ),
+      ),
+    );
+
+    final directory = await getTemporaryDirectory();
+    final file = File(
+      '${directory.path}/report_${_viewMode == 'year' ? _selectedYear : DateFormat('yyyyMMdd').format(_selectedWeekStart)}.pdf',
+    );
+    await file.writeAsBytes(await pdf.save());
+
+    await Share.shareXFiles(
+      [XFile(file.path)],
+      text: _viewMode == 'year'
+          ? 'Informe Anual ${_selectedYear - 1}-$_selectedYear'
+          : 'Informe Semanal ${DateFormat('dd/MM').format(_selectedWeekStart)}',
+    );
+  }
+}
+
+
+
+8.lib/settings_screen.dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:calendar_app/main.dart';
+import 'package:calendar_app/database_helper.dart';
+import 'package:calendar_app/notification_helper.dart';
+import 'package:calendar_app/widget_helper.dart';
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({Key? key}) : super(key: key);
+
+  @override
+  _SettingsScreenState createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  late TextEditingController _goalController;
+  bool _vibrationEnabled = true;
+  String _notificationSound = 'default';
+  int _selectedYear = DateTime.now().year;
+  String _dateFormat = '24h';
+  String _textSize = 'medium';
+  String _language = 'es';
+  bool _widgetShowHours = true;
+  bool _widgetShowNotes = true;
+  bool _widgetShowEvents = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _goalController = TextEditingController();
+    _loadSettings();
+  }
+
+  @override
+  void dispose() {
+    _goalController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final db = DatabaseHelper.instance;
+    setState(() {
+      _vibrationEnabled = prefs.getBool('notificationVibration') ?? true;
+      _notificationSound = prefs.getString('notificationSound') ?? 'default';
+      _dateFormat = prefs.getString('dateFormat') ?? '24h';
+      _textSize = prefs.getString('textSize') ?? 'medium';
+      _language = prefs.getString('language') ?? 'es';
+      _widgetShowHours = prefs.getBool('widget_show_hours') ?? true;
+      _widgetShowNotes = prefs.getBool('widget_show_notes') ?? true;
+      _widgetShowEvents = prefs.getBool('widget_show_events') ?? true;
+    });
+
+    // Cargamos la meta anual desde la base de datos
+    _goalController.text = (await db.getGoal(_selectedYear)).toString();
+  }
+
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('notificationVibration', _vibrationEnabled);
+    await prefs.setString('notificationSound', _notificationSound);
+    await prefs.setString('dateFormat', _dateFormat);
+    await prefs.setString('textSize', _textSize);
+    await prefs.setString('language', _language);
+    await prefs.setBool('widget_show_hours', _widgetShowHours);
+    await prefs.setBool('widget_show_notes', _widgetShowNotes);
+    await prefs.setBool('widget_show_events', _widgetShowEvents);
+
+    final goal = double.tryParse(_goalController.text) ?? 600.0;
+    await DatabaseHelper.instance.setGoal(_selectedYear, goal);
+
+    // Actualizar el widget tras guardar los ajustes
+    await WidgetHelper.updateWidgetData();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textScaleFactor = _getTextScaleFactor();
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          _language == 'es' ? 'Ajustes' : 'Settings',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildSectionTitle(_language == 'es' ? 'Apariencia' : 'Appearance'),
+              _buildAppearanceSettings(),
+              const SizedBox(height: 16),
+              _buildSectionTitle(_language == 'es' ? 'Notificaciones' : 'Notifications'),
+              _buildNotificationSettings(),
+              const SizedBox(height: 16),
+              _buildSectionTitle(_language == 'es' ? 'Metas' : 'Goals'),
+              _buildGoalSettings(),
+              const SizedBox(height: 16),
+              _buildSectionTitle(_language == 'es' ? 'Widget' : 'Widget'),
+              _buildWidgetSettings(),
+              const SizedBox(height: 16),
+              _buildSectionTitle(_language == 'es' ? 'Datos' : 'Data'),
+              _buildDataSettings(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  double _getTextScaleFactor() {
+    switch (_textSize) {
+      case 'small':
+        return 0.9;
+      case 'medium':
+        return 1.0;
+      case 'large':
+        return 1.2;
+      default:
+        return 1.0;
+    }
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.headlineMedium!.copyWith(fontSize: 20),
+      ),
+    );
+  }
+
+  Widget _buildAppearanceSettings() {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        children: [
+          ListTile(
+            title: Text(_language == 'es' ? 'Tema' : 'Theme'),
+            trailing: Consumer<ThemeProvider>(
+              builder: (context, themeProvider, child) => DropdownButton<ThemeMode>(
+                value: themeProvider.themeMode,
+                items: [
+                  DropdownMenuItem(
+                    value: ThemeMode.light,
+                    child: Text(_language == 'es' ? 'Claro' : 'Light'),
+                  ),
+                  DropdownMenuItem(
+                    value: ThemeMode.dark,
+                    child: Text(_language == 'es' ? 'Oscuro' : 'Dark'),
+                  ),
+                  DropdownMenuItem(
+                    value: ThemeMode.system,
+                    child: Text(_language == 'es' ? 'Sistema' : 'System'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    themeProvider.setTheme(value);
+                  }
+                },
+              ),
+            ),
+          ),
+          ListTile(
+            title: Text(_language == 'es' ? 'Formato de Fecha/Hora' : 'Date/Time Format'),
+            trailing: DropdownButton<String>(
+              value: _dateFormat,
+              items: [
+                DropdownMenuItem(value: '12h', child: Text(_language == 'es' ? '12 horas' : '12-hour')),
+                DropdownMenuItem(value: '24h', child: Text(_language == 'es' ? '24 horas' : '24-hour')),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() {
+                    _dateFormat = value;
+                    _saveSettings(); // Guardamos cada vez que cambiamos
+                  });
+                }
+              },
+            ),
+          ),
+          ListTile(
+            title: Text(_language == 'es' ? 'Tamaño de Texto' : 'Text Size'),
+            trailing: DropdownButton<String>(
+              value: _textSize,
+              items: [
+                DropdownMenuItem(value: 'small', child: Text(_language == 'es' ? 'Pequeño' : 'Small')),
+                DropdownMenuItem(value: 'medium', child: Text(_language == 'es' ? 'Mediano' : 'Medium')),
+                DropdownMenuItem(value: 'large', child: Text(_language == 'es' ? 'Grande' : 'Large')),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() {
+                    _textSize = value;
+                    _saveSettings();
+                  });
+                }
+              },
+            ),
+          ),
+          ListTile(
+            title: Text(_language == 'es' ? 'Idioma' : 'Language'),
+            trailing: DropdownButton<String>(
+              value: _language,
+              items: [
+                DropdownMenuItem(value: 'es', child: Text(_language == 'es' ? 'Español' : 'Spanish')),
+                DropdownMenuItem(value: 'en', child: Text(_language == 'es' ? 'Inglés' : 'English')),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() {
+                    _language = value;
+                    _saveSettings();
+                  });
+                }
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotificationSettings() {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        children: [
+          SwitchListTile(
+            title: Text(_language == 'es' ? 'Vibración' : 'Vibration'),
+            value: _vibrationEnabled,
+            onChanged: (value) async {
+              setState(() {
+                _vibrationEnabled = value;
+              });
+              await _saveSettings();
+            },
+            activeColor: Theme.of(context).primaryColor,
+          ),
+          ListTile(
+            title: Text(_language == 'es' ? 'Sonido de Notificación' : 'Notification Sound'),
+            trailing: DropdownButton<String>(
+              value: _notificationSound,
+              items: [
+                DropdownMenuItem(value: 'default', child: Text(_language == 'es' ? 'Predeterminado' : 'Default')),
+                DropdownMenuItem(value: 'alert', child: Text(_language == 'es' ? 'Alerta' : 'Alert')),
+                DropdownMenuItem(value: 'soft', child: Text(_language == 'es' ? 'Suave' : 'Soft')),
+              ],
+              onChanged: (value) async {
+                if (value != null) {
+                  setState(() {
+                    _notificationSound = value;
+                  });
+                  await _saveSettings();
+                  // Ejemplo de notificación inmediata para probar el sonido
+                  await NotificationHelper.showInstantNotification(
+                    title: _language == 'es' ? 'Prueba de Sonido' : 'Sound Test',
+                    body: _language == 'es' ? 'Este es un ejemplo de notificación.' : 'This is a test notification.',
+                    sound: value == 'default' ? null : value,
+                  );
+                }
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGoalSettings() {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        children: [
+          ListTile(
+            title: Text(_language == 'es' ? 'Año' : 'Year'),
+            trailing: DropdownButton<int>(
+              value: _selectedYear,
+              items: List.generate(10, (index) => DateTime.now().year - 5 + index)
+                  .map((year) => DropdownMenuItem(
+                        value: year,
+                        child: Text('$year-${year + 1}'),
+                      ))
+                  .toList(),
+              onChanged: (value) async {
+                if (value != null) {
+                  setState(() {
+                    _selectedYear = value;
+                  });
+                  final db = DatabaseHelper.instance;
+                  _goalController.text = (await db.getGoal(_selectedYear)).toString();
+                }
+              },
+            ),
+          ),
+          ListTile(
+            title: Text(_language == 'es' ? 'Meta de Horas Anual' : 'Annual Hours Goal'),
+            subtitle: TextField(
+              controller: _goalController,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                hintText: _language == 'es' ? 'Ingresa tu meta (horas)' : 'Enter your goal (hours)',
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (value) async {
+                await _saveSettings();
+                // Checa notificación de meta cada vez que se cambia
+                await NotificationHelper.checkGoalNotification(
+                  _selectedYear,
+                  await DatabaseHelper.instance.getMonthlyHours(DateTime.now()),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWidgetSettings() {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        children: [
+          SwitchListTile(
+            title: Text(_language == 'es' ? 'Mostrar Horas en Widget' : 'Show Hours in Widget'),
+            value: _widgetShowHours,
+            onChanged: (value) async {
+              setState(() {
+                _widgetShowHours = value;
+              });
+              await _saveSettings();
+            },
+            activeColor: Theme.of(context).primaryColor,
+          ),
+          SwitchListTile(
+            title: Text(_language == 'es' ? 'Mostrar Notas en Widget' : 'Show Notes in Widget'),
+            value: _widgetShowNotes,
+            onChanged: (value) async {
+              setState(() {
+                _widgetShowNotes = value;
+              });
+              await _saveSettings();
+            },
+            activeColor: Theme.of(context).primaryColor,
+          ),
+          SwitchListTile(
+            title: Text(_language == 'es' ? 'Mostrar Eventos en Widget' : 'Show Events in Widget'),
+            value: _widgetShowEvents,
+            onChanged: (value) async {
+              setState(() {
+                _widgetShowEvents = value;
+              });
+              await _saveSettings();
+            },
+            activeColor: Theme.of(context).primaryColor,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDataSettings() {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        children: [
+          ListTile(
+            title: Text(_language == 'es' ? 'Respaldar Datos' : 'Backup Data'),
+            trailing: const Icon(Icons.backup),
+            onTap: () async {
+              await DatabaseHelper.instance.backupDatabase();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(_language == 'es' ? 'Respaldo creado y compartido' : 'Backup created and shared'),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            title: Text(_language == 'es' ? 'Restaurar Datos' : 'Restore Data'),
+            trailing: const Icon(Icons.restore),
+            onTap: () async {
+              await DatabaseHelper.instance.restoreDatabase();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(_language == 'es' ? 'Datos restaurados' : 'Data restored'),
+                ),
+              );
+              setState(() {});
+            },
+          ),
+          ListTile(
+            title: Text(_language == 'es' ? 'Reiniciar Tutorial' : 'Reset Tutorial'),
+            trailing: const Icon(Icons.help),
+            onTap: () {
+              Provider.of<AppState>(context, listen: false).resetFirstRun();
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+              );
+            },
+          ),
+          ListTile(
+            title: Text(_language == 'es' ? 'Borrar Todo' : 'Delete All'),
+            trailing: const Icon(Icons.delete_forever, color: Colors.red),
+            onTap: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text(_language == 'es' ? 'Confirmar' : 'Confirm'),
+                  content: Text(
+                    _language == 'es'
+                        ? '¿Estás seguro de que quieres borrar todos los datos? Esto no se puede deshacer.'
+                        : 'Are you sure you want to delete all data? This cannot be undone.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: Text(_language == 'es' ? 'Cancelar' : 'Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: Text(
+                        _language == 'es' ? 'Borrar' : 'Delete',
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm == true) {
+                await DatabaseHelper.instance.clearDatabase();
+                await NotificationHelper.cancelAllNotifications();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(_language == 'es' ? 'Todos los datos han sido borrados' : 'All data has been deleted'),
+                  ),
+                );
+                setState(() {});
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+
+9.lib/widget_helper.dart
+import 'dart:convert';
+import 'package:home_widget/home_widget.dart';
+import 'package:calendar_app/database_helper.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class WidgetHelper {
+  static const String widgetName = 'SmartCalendarWidgetProvider';
+  static const String appGroupId = 'group.com.example.calendar_app';
+
+  // Inicializar el widget y registrar el callback
+  static Future<void> initialize() async {
+    await HomeWidget.setAppGroupId(appGroupId);
+    await HomeWidget.registerBackgroundCallback(backgroundCallback);
+    await updateWidgetData(); // Actualizar datos al iniciar
+  }
+
+  // Callback para acciones desde el widget
+  static Future<void> backgroundCallback(Uri? uri) async {
+    if (uri == null) return;
+
+    final db = DatabaseHelper.instance;
+    final now = DateTime.now();
+
+    switch (uri.host) {
+      case 'add_hour_1':
+        await db.insertEvent({
+          'date': now.toIso8601String(),
+          'title': 'Horas predicadas',
+          'hours': 1.0,
+          'category': 'Predicación',
+        });
+        break;
+      case 'add_hour_30min':
+        await db.insertEvent({
+          'date': now.toIso8601String(),
+          'title': 'Horas predicadas',
+          'hours': 0.5,
+          'category': 'Predicación',
+        });
+        break;
+      case 'add_note':
+        await db.insertNote({
+          'date': now.toIso8601String(),
+          'content': jsonEncode([{'insert': 'Nota rápida desde widget\n'}]),
+          'isCompleted': 0,
+          'isHandwritten': 0,
+          'tags': jsonEncode([]),
+          'audioPath': null,
+          'isFavorite': 0,
+        });
+        break;
+    }
+    await updateWidgetData();
+  }
+
+  // Actualizar datos del widget
+  static Future<void> updateWidgetData() async {
+    final db = DatabaseHelper.instance;
+    // Asegúrate de que SharedPreferences esté correctamente instalado
+    final prefs = await SharedPreferences.getInstance();
+
+    final now = DateTime.now();
+    final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+    final endOfWeek = startOfWeek.add(const Duration(days: 6));
+    final startOfMonth = DateTime(now.year, now.month, 1);
+    final endOfMonth = DateTime(now.year, now.month + 1, 0);
+
+    // Horas
+    final weekEvents = await db.getEventsByPeriod(startOfWeek, endOfWeek);
+    final monthEvents = await db.getEventsByPeriod(startOfMonth, endOfMonth);
+    final weekHours = weekEvents.fold<double>(0.0, (sum, event) => sum + ((event['hours'] as num?)?.toDouble() ?? 0.0));
+    final monthHours = monthEvents.fold<double>(0.0, (sum, event) => sum + ((event['hours'] as num?)?.toDouble() ?? 0.0));
+    final monthGoal = (await db.getGoal(now.year)) / 12;
+
+    // Notas y eventos
+    final allNotes = await db.getAllNotes();
+    final notes = allNotes
+        .where((note) => note['isFavorite'] == 1)
+        .take(3)
+        .map((note) => _parseNoteContent(note['content'], note['isHandwritten'] == 1))
+        .toList();
+
+    final events = (await db.getEventsByPeriod(now, now.add(const Duration(days: 7))))
+        .take(3)
+        .map((event) => event['title'] as String)
+        .toList();
+
+    // Preferencias del widget
+    final showHours = prefs.getBool('widget_show_hours') ?? true;
+    final showNotes = prefs.getBool('widget_show_notes') ?? true;
+    final showEvents = prefs.getBool('widget_show_events') ?? true;
+    final theme = prefs.getString('themeMode') ?? 'system';
+
+    // Enviar datos al widget
+    await HomeWidget.saveWidgetData('weekHours', weekHours);
+    await HomeWidget.saveWidgetData('monthHours', monthHours);
+    await HomeWidget.saveWidgetData('monthGoal', monthGoal);
+    await HomeWidget.saveWidgetData('notes', jsonEncode(notes));
+    await HomeWidget.saveWidgetData('events', jsonEncode(events));
+    await HomeWidget.saveWidgetData('showHours', showHours);
+    await HomeWidget.saveWidgetData('showNotes', showNotes);
+    await HomeWidget.saveWidgetData('showEvents', showEvents);
+    await HomeWidget.saveWidgetData('theme', theme);
+    await HomeWidget.updateWidget(name: widgetName);
+  }
+
+  static String _parseNoteContent(String content, bool isHandwritten) {
+    if (isHandwritten) return 'Nota manuscrita';
+    try {
+      final delta = jsonDecode(content) as List;
+      return delta.map((op) => op['insert']?.toString() ?? '').join();
+    } catch (e) {
+      return content;
+    }
+  }
+}
+
+
+
+10.lib/widget_info.xml
+<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="200dp"
+    android:minHeight="100dp"
+
+    <!-- updatePeriodMillis define cada cuánto tiempo (en milisegundos)
+         el sistema intentará actualizar tu widget. 
+         Por ejemplo, 1800000 ms = 30 min.
+         También ten en cuenta que, con Doze y otras optimizaciones en Android,
+         no siempre se garantizan actualizaciones exactas. -->
+    android:updatePeriodMillis="1800000"
+
+    <!-- initialLayout es el layout que se utilizará la primera vez 
+         que se muestre el widget. Debe apuntar a un recurso de layout existente. -->
+    android:initialLayout="@layout/widget_layout"
+
+    <!-- resizeMode indica si tu widget puede redimensionarse horizontalmente,
+         verticalmente o en ambas direcciones. 
+         "horizontal|vertical" significa que soportará ambas dimensiones. -->
+    android:resizeMode="horizontal|vertical"
+
+    <!-- widgetCategory es home_screen, 
+         indicando que el widget es para la pantalla de inicio principal. -->
+    android:widgetCategory="home_screen">
+</appwidget-provider>
+
+
+
+11.lib/widget_layout.xml
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+     Para widgets, es recomendable usar layouts simples 
+     (LinearLayout, FrameLayout) y Views soportadas por RemoteViews.
+     Los elementos que has usado (LinearLayout, TextView, ProgressBar, Button) 
+     sí son compatibles con RemoteViews. 
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="8dp"
+    android:background="@android:color/white">
+
+    <!-- Contenedor de Horas -->
+    <LinearLayout
+        android:id="@+id/hours_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="visible">
+
+        <TextView
+            android:id="@+id/week_hours_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Horas Semanales: 0" />
+
+        <TextView
+            android:id="@+id/month_hours_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Horas Mensuales: 0" />
+
+        <ProgressBar
+            android:id="@+id/month_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100" />
+    </LinearLayout>
+
+    <!-- Contenedor de Notas -->
+    <LinearLayout
+        android:id="@+id/notes_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="8dp"
+        android:visibility="visible">
+
+        <TextView
+            android:id="@+id/notes_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Notas Favoritas" />
+
+        <TextView
+            android:id="@+id/note_1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/note_2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/note_3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+    </LinearLayout>
+
+    <!-- Contenedor de Eventos -->
+    <LinearLayout
+        android:id="@+id/events_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="8dp"
+        android:visibility="visible">
+
+        <TextView
+            android:id="@+id/events_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Eventos Próximos" />
+
+        <TextView
+            android:id="@+id/event_1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/event_2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/event_3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+    </LinearLayout>
+
+    <!-- Botones de acción en el widget -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <Button
+            android:id="@+id/add_hour_1_button"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="+1h" />
+
+        <Button
+            android:id="@+id/add_hour_30min_button"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="+30min" />
+
+        <Button
+            android:id="@+id/add_note_button"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="Nota" />
+    </LinearLayout>
+</LinearLayout>
+
+
+
+12.lib/SmartCalendarWidgetProvider.kt
+package com.example.calendar_app
+
+import android.appwidget.AppWidgetManager
+import android.content.Context
+import android.content.SharedPreferences
+import android.net.Uri
+import android.widget.RemoteViews
+import es.antonborri.home_widget.HomeWidgetBackgroundIntent
+import es.antonborri.home_widget.HomeWidgetProvider
+
+class SmartCalendarWidgetProvider : HomeWidgetProvider() {
+
+    override fun onUpdate(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetIds: IntArray,
+        widgetData: SharedPreferences
+    ) {
+        for (appWidgetId in appWidgetIds) {
+            val views = RemoteViews(context.packageName, R.layout.widget_layout)
+
+            // Obtiene la preferencia 'theme'
+            val theme = widgetData.getString("theme", "system")
+            val isDark = theme == "dark" ||
+                (theme == "system" &&
+                    (context.resources.configuration.uiMode and
+                            android.content.res.Configuration.UI_MODE_NIGHT_MASK
+                            ) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+
+            // Fondo según tema
+            views.setInt(
+                R.id.widget_layout,
+                "setBackgroundResource",
+                if (isDark) android.R.color.black else android.R.color.white
+            )
+
+            // Sección: Horas
+            val showHours = widgetData.getBoolean("showHours", true)
+            views.setViewVisibility(
+                R.id.hours_container,
+                if (showHours) android.view.View.VISIBLE else android.view.View.GONE
+            )
+
+            if (showHours) {
+                val weekHours = widgetData.getFloat("weekHours", 0f)
+                val monthHours = widgetData.getFloat("monthHours", 0f)
+                val monthGoal = widgetData.getFloat("monthGoal", 0f)
+                views.setTextViewText(R.id.week_hours_text, "Semana: $weekHours h")
+                views.setTextViewText(R.id.month_hours_text, "Mes: $monthHours h")
+
+                // Evita valores negativos o raros si monthGoal es 0
+                views.setProgressBar(
+                    R.id.month_progress,
+                    monthGoal.toInt().coerceAtLeast(1),
+                    monthHours.toInt().coerceAtLeast(0),
+                    false
+                )
+            }
+
+            // Sección: Notas
+            val showNotes = widgetData.getBoolean("showNotes", true)
+            views.setViewVisibility(
+                R.id.notes_container,
+                if (showNotes) android.view.View.VISIBLE else android.view.View.GONE
+            )
+
+            if (showNotes) {
+                val notesJson = widgetData.getString("notes", "[]") ?: "[]"
+                // Eliminamos corchetes y convertimos en array separando por comas
+                // Manejo de cadenas con comillas
+                val notes = notesJson.removeSurrounding("[", "]").split(",").map { it.trim() }
+                views.setTextViewText(R.id.note_1, notes.getOrNull(0)?.removeSurrounding("\"") ?: "")
+                views.setTextViewText(R.id.note_2, notes.getOrNull(1)?.removeSurrounding("\"") ?: "")
+                views.setTextViewText(R.id.note_3, notes.getOrNull(2)?.removeSurrounding("\"") ?: "")
+            }
+
+            // Sección: Eventos
+            val showEvents = widgetData.getBoolean("showEvents", true)
+            views.setViewVisibility(
+                R.id.events_container,
+                if (showEvents) android.view.View.VISIBLE else android.view.View.GONE
+            )
+
+            if (showEvents) {
+                val eventsJson = widgetData.getString("events", "[]") ?: "[]"
+                val events = eventsJson.removeSurrounding("[", "]").split(",").map { it.trim() }
+                views.setTextViewText(R.id.event_1, events.getOrNull(0)?.removeSurrounding("\"") ?: "")
+                views.setTextViewText(R.id.event_2, events.getOrNull(1)?.removeSurrounding("\"") ?: "")
+                views.setTextViewText(R.id.event_3, events.getOrNull(2)?.removeSurrounding("\"") ?: "")
+            }
+
+            // Botones del Widget -> Se envían Broadcasts con URIs específicas
+            val addHour1Intent = HomeWidgetBackgroundIntent.getBroadcast(
+                context,
+                Uri.parse("com.example.calendar_app://widget/add_hour_1")
+            )
+            val addHour30MinIntent = HomeWidgetBackgroundIntent.getBroadcast(
+                context,
+                Uri.parse("com.example.calendar_app://widget/add_hour_30min")
+            )
+            val addNoteIntent = HomeWidgetBackgroundIntent.getBroadcast(
+                context,
+                Uri.parse("com.example.calendar_app://widget/add_note")
+            )
+
+            views.setOnClickPendingIntent(R.id.add_hour_1_button, addHour1Intent)
+            views.setOnClickPendingIntent(R.id.add_hour_30min_button, addHour30MinIntent)
+            views.setOnClickPendingIntent(R.id.add_note_button, addNoteIntent)
+
+            // Actualiza el widget
+            appWidgetManager.updateAppWidget(appWidgetId, views)
+        }
+    }
+}
+
+
+
+13.lib/AndroidManifest.xml
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.calendar_app">
+
+    <!-- Permisos para acceso al calendario -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+
+    <!-- Permisos para almacenamiento (si usas backup/restore en almacenamiento externo) -->
+    <!-- Quita si no los necesitas -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <!-- Permiso de record audio (si grabas audio real, no placeholder) -->
+    <!-- Quita si tu app no graba audio -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Otras configuraciones de tu app -->
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.CalendarApp">
+
+        <!-- Actividad principal de Flutter -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Declaración del widget -->
+        <receiver
+            android:name=".SmartCalendarWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info" />
+        </receiver>
+
+    </application>
+
+</manifest>
+
+
+
+14.lib/pubspec.yaml
+name: calendar_app
+description: A new Flutter project.
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Base de datos
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+  path_provider: ^2.1.4
+
+  # Calendario y notificaciones
+  table_calendar: ^3.1.0
+  flutter_local_notifications: ^17.2.2
+  timezone: ^0.9.2
+
+  # Librerías de UI
+  animated_bottom_navigation_bar: ^1.3.3
+  provider: ^6.1.2
+
+  # Edición de texto y firmas a mano
+  flutter_quill: ^10.7.0
+  hand_signature: ^3.0.0
+
+  # Audio
+  audioplayers: ^6.1.0
+
+  # PDF y compartición
+  pdf: ^3.11.0
+  share_plus: ^10.0.2
+  file_picker: ^8.1.2
+
+  # Home Widget (para el widget en pantalla de inicio)
+  home_widget: ^0.6.0
+
+  # Manejo de permisos (calendario, etc.)
+  permission_handler: ^11.3.1
+
+  # Para gestionar calendarios del dispositivo
+  device_calendar: ^5.0.0
+
+  # Para guardar y leer configuraciones
+  shared_preferences: ^2.1.0
+
+  # Internacionalización
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
