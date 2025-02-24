@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="200dp"
+    android:minHeight="100dp"
+
+    <!-- updatePeriodMillis define cada cuánto tiempo (en milisegundos)
+         el sistema intentará actualizar tu widget. 
+         Por ejemplo, 1800000 ms = 30 min.
+         También ten en cuenta que, con Doze y otras optimizaciones en Android,
+         no siempre se garantizan actualizaciones exactas. -->
+    android:updatePeriodMillis="1800000"
+
+    <!-- initialLayout es el layout que se utilizará la primera vez 
+         que se muestre el widget. Debe apuntar a un recurso de layout existente. -->
+    android:initialLayout="@layout/widget_layout"
+
+    <!-- resizeMode indica si tu widget puede redimensionarse horizontalmente,
+         verticalmente o en ambas direcciones. 
+         "horizontal|vertical" significa que soportará ambas dimensiones. -->
+    android:resizeMode="horizontal|vertical"
+
+    <!-- widgetCategory es home_screen, 
+         indicando que el widget es para la pantalla de inicio principal. -->
+    android:widgetCategory="home_screen">
+</appwidget-provider>
