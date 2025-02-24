@@ -41,9 +41,7 @@ class WidgetHelper {
       case 'add_note':
         await db.insertNote({
           'date': now.toIso8601String(),
-          'content': jsonEncode([
-            {'insert': 'Nota rápida desde widget\n'}
-          ]),
+          'content': jsonEncode([{'insert': 'Nota rápida desde widget\n'}]),
           'isCompleted': 0,
           'isHandwritten': 0,
           'tags': jsonEncode([]),
@@ -58,14 +56,16 @@ class WidgetHelper {
   // Actualizar datos del widget
   static Future<void> updateWidgetData() async {
     final db = DatabaseHelper.instance;
+    // Asegúrate de que SharedPreferences esté correctamente instalado
     final prefs = await SharedPreferences.getInstance();
+
     final now = DateTime.now();
     final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
     final endOfWeek = startOfWeek.add(const Duration(days: 6));
     final startOfMonth = DateTime(now.year, now.month, 1);
     final endOfMonth = DateTime(now.year, now.month + 1, 0);
 
-    // Horas de la semana y del mes
+    // Horas
     final weekEvents = await db.getEventsByPeriod(startOfWeek, endOfWeek);
     final monthEvents = await db.getEventsByPeriod(startOfMonth, endOfMonth);
     final weekHours = weekEvents.fold<double>(0.0, (sum, event) => sum + ((event['hours'] as num?)?.toDouble() ?? 0.0));
@@ -79,6 +79,7 @@ class WidgetHelper {
         .take(3)
         .map((note) => _parseNoteContent(note['content'], note['isHandwritten'] == 1))
         .toList();
+
     final events = (await db.getEventsByPeriod(now, now.add(const Duration(days: 7))))
         .take(3)
         .map((event) => event['title'] as String)
@@ -104,9 +105,7 @@ class WidgetHelper {
   }
 
   static String _parseNoteContent(String content, bool isHandwritten) {
-    if (isHandwritten) {
-      return 'Nota manuscrita';
-    }
+    if (isHandwritten) return 'Nota manuscrita';
     try {
       final delta = jsonDecode(content) as List;
       return delta.map((op) => op['insert']?.toString() ?? '').join();
