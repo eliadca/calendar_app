@@ -5,7 +5,6 @@ import 'package:calendar_app/main.dart';
 import 'package:calendar_app/database_helper.dart';
 import 'package:calendar_app/notification_helper.dart';
 import 'package:calendar_app/widget_helper.dart';
-import 'onboarding_screen.dart'; // Asegúrate de que la ruta sea la correcta según tu estructura
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -42,11 +41,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     final db = DatabaseHelper.instance;
-    final goal = await db.getGoal(_selectedYear);
     setState(() {
       _vibrationEnabled = prefs.getBool('notificationVibration') ?? true;
       _notificationSound = prefs.getString('notificationSound') ?? 'default';
-      _goalController.text = goal.toString();
       _dateFormat = prefs.getString('dateFormat') ?? '24h';
       _textSize = prefs.getString('textSize') ?? 'medium';
       _language = prefs.getString('language') ?? 'es';
@@ -54,6 +51,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _widgetShowNotes = prefs.getBool('widget_show_notes') ?? true;
       _widgetShowEvents = prefs.getBool('widget_show_events') ?? true;
     });
+
+    // Cargamos la meta anual desde la base de datos
+    _goalController.text = (await db.getGoal(_selectedYear)).toString();
   }
 
   Future<void> _saveSettings() async {
@@ -66,8 +66,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setBool('widget_show_hours', _widgetShowHours);
     await prefs.setBool('widget_show_notes', _widgetShowNotes);
     await prefs.setBool('widget_show_events', _widgetShowEvents);
+
     final goal = double.tryParse(_goalController.text) ?? 600.0;
     await DatabaseHelper.instance.setGoal(_selectedYear, goal);
+
+    // Actualizar el widget tras guardar los ajustes
     await WidgetHelper.updateWidgetData();
   }
 
@@ -126,7 +129,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Text(
         title,
-        style: Theme.of(context).textTheme.headline6?.copyWith(fontSize: 20),
+        style: Theme.of(context).textTheme.headlineMedium!.copyWith(fontSize: 20),
       ),
     );
   }
@@ -169,21 +172,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: DropdownButton<String>(
               value: _dateFormat,
               items: [
-                DropdownMenuItem(
-                  value: '12h',
-                  child: Text(_language == 'es' ? '12 horas' : '12-hour'),
-                ),
-                DropdownMenuItem(
-                  value: '24h',
-                  child: Text(_language == 'es' ? '24 horas' : '24-hour'),
-                ),
+                DropdownMenuItem(value: '12h', child: Text(_language == 'es' ? '12 horas' : '12-hour')),
+                DropdownMenuItem(value: '24h', child: Text(_language == 'es' ? '24 horas' : '24-hour')),
               ],
               onChanged: (value) {
                 if (value != null) {
                   setState(() {
                     _dateFormat = value;
+                    _saveSettings(); // Guardamos cada vez que cambiamos
                   });
-                  _saveSettings();
                 }
               },
             ),
@@ -193,25 +190,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: DropdownButton<String>(
               value: _textSize,
               items: [
-                DropdownMenuItem(
-                  value: 'small',
-                  child: Text(_language == 'es' ? 'Pequeño' : 'Small'),
-                ),
-                DropdownMenuItem(
-                  value: 'medium',
-                  child: Text(_language == 'es' ? 'Mediano' : 'Medium'),
-                ),
-                DropdownMenuItem(
-                  value: 'large',
-                  child: Text(_language == 'es' ? 'Grande' : 'Large'),
-                ),
+                DropdownMenuItem(value: 'small', child: Text(_language == 'es' ? 'Pequeño' : 'Small')),
+                DropdownMenuItem(value: 'medium', child: Text(_language == 'es' ? 'Mediano' : 'Medium')),
+                DropdownMenuItem(value: 'large', child: Text(_language == 'es' ? 'Grande' : 'Large')),
               ],
               onChanged: (value) {
                 if (value != null) {
                   setState(() {
                     _textSize = value;
+                    _saveSettings();
                   });
-                  _saveSettings();
                 }
               },
             ),
@@ -221,21 +209,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: DropdownButton<String>(
               value: _language,
               items: [
-                DropdownMenuItem(
-                  value: 'es',
-                  child: Text(_language == 'es' ? 'Español' : 'Spanish'),
-                ),
-                DropdownMenuItem(
-                  value: 'en',
-                  child: Text(_language == 'es' ? 'Inglés' : 'English'),
-                ),
+                DropdownMenuItem(value: 'es', child: Text(_language == 'es' ? 'Español' : 'Spanish')),
+                DropdownMenuItem(value: 'en', child: Text(_language == 'es' ? 'Inglés' : 'English')),
               ],
               onChanged: (value) {
                 if (value != null) {
                   setState(() {
                     _language = value;
+                    _saveSettings();
                   });
-                  _saveSettings();
                 }
               },
             ),
@@ -267,18 +249,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: DropdownButton<String>(
               value: _notificationSound,
               items: [
-                DropdownMenuItem(
-                  value: 'default',
-                  child: Text(_language == 'es' ? 'Predeterminado' : 'Default'),
-                ),
-                DropdownMenuItem(
-                  value: 'alert',
-                  child: Text(_language == 'es' ? 'Alerta' : 'Alert'),
-                ),
-                DropdownMenuItem(
-                  value: 'soft',
-                  child: Text(_language == 'es' ? 'Suave' : 'Soft'),
-                ),
+                DropdownMenuItem(value: 'default', child: Text(_language == 'es' ? 'Predeterminado' : 'Default')),
+                DropdownMenuItem(value: 'alert', child: Text(_language == 'es' ? 'Alerta' : 'Alert')),
+                DropdownMenuItem(value: 'soft', child: Text(_language == 'es' ? 'Suave' : 'Soft')),
               ],
               onChanged: (value) async {
                 if (value != null) {
@@ -286,11 +259,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _notificationSound = value;
                   });
                   await _saveSettings();
+                  // Ejemplo de notificación inmediata para probar el sonido
                   await NotificationHelper.showInstantNotification(
                     title: _language == 'es' ? 'Prueba de Sonido' : 'Sound Test',
-                    body: _language == 'es'
-                        ? 'Este es un ejemplo de notificación.'
-                        : 'This is a test notification.',
+                    body: _language == 'es' ? 'Este es un ejemplo de notificación.' : 'This is a test notification.',
                     sound: value == 'default' ? null : value,
                   );
                 }
@@ -312,8 +284,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: Text(_language == 'es' ? 'Año' : 'Year'),
             trailing: DropdownButton<int>(
               value: _selectedYear,
-              items: List.generate(
-                      10, (index) => DateTime.now().year - 5 + index)
+              items: List.generate(10, (index) => DateTime.now().year - 5 + index)
                   .map((year) => DropdownMenuItem(
                         value: year,
                         child: Text('$year-${year + 1}'),
@@ -324,30 +295,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   setState(() {
                     _selectedYear = value;
                   });
-                  final goal = await DatabaseHelper.instance.getGoal(_selectedYear);
-                  setState(() {
-                    _goalController.text = goal.toString();
-                  });
+                  final db = DatabaseHelper.instance;
+                  _goalController.text = (await db.getGoal(_selectedYear)).toString();
                 }
               },
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: TextField(
+          ListTile(
+            title: Text(_language == 'es' ? 'Meta de Horas Anual' : 'Annual Hours Goal'),
+            subtitle: TextField(
               controller: _goalController,
               keyboardType: TextInputType.number,
               decoration: InputDecoration(
-                hintText: _language == 'es'
-                    ? 'Ingresa tu meta (horas)'
-                    : 'Enter your goal (hours)',
+                hintText: _language == 'es' ? 'Ingresa tu meta (horas)' : 'Enter your goal (hours)',
                 border: const OutlineInputBorder(),
               ),
               onChanged: (value) async {
                 await _saveSettings();
-                final monthlyHours =
-                    await DatabaseHelper.instance.getMonthlyHours(DateTime.now());
-                await NotificationHelper.checkGoalNotification(_selectedYear, monthlyHours);
+                // Checa notificación de meta cada vez que se cambia
+                await NotificationHelper.checkGoalNotification(
+                  _selectedYear,
+                  await DatabaseHelper.instance.getMonthlyHours(DateTime.now()),
+                );
               },
             ),
           ),
@@ -363,9 +332,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         children: [
           SwitchListTile(
-            title: Text(_language == 'es'
-                ? 'Mostrar Horas en Widget'
-                : 'Show Hours in Widget'),
+            title: Text(_language == 'es' ? 'Mostrar Horas en Widget' : 'Show Hours in Widget'),
             value: _widgetShowHours,
             onChanged: (value) async {
               setState(() {
@@ -376,9 +343,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             activeColor: Theme.of(context).primaryColor,
           ),
           SwitchListTile(
-            title: Text(_language == 'es'
-                ? 'Mostrar Notas en Widget'
-                : 'Show Notes in Widget'),
+            title: Text(_language == 'es' ? 'Mostrar Notas en Widget' : 'Show Notes in Widget'),
             value: _widgetShowNotes,
             onChanged: (value) async {
               setState(() {
@@ -389,9 +354,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             activeColor: Theme.of(context).primaryColor,
           ),
           SwitchListTile(
-            title: Text(_language == 'es'
-                ? 'Mostrar Eventos en Widget'
-                : 'Show Events in Widget'),
+            title: Text(_language == 'es' ? 'Mostrar Eventos en Widget' : 'Show Events in Widget'),
             value: _widgetShowEvents,
             onChanged: (value) async {
               setState(() {
@@ -419,9 +382,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await DatabaseHelper.instance.backupDatabase();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text(_language == 'es'
-                      ? 'Respaldo creado y compartido'
-                      : 'Backup created and shared'),
+                  content: Text(_language == 'es' ? 'Respaldo creado y compartido' : 'Backup created and shared'),
                 ),
               );
             },
@@ -433,9 +394,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await DatabaseHelper.instance.restoreDatabase();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text(_language == 'es'
-                      ? 'Datos restaurados'
-                      : 'Data restored'),
+                  content: Text(_language == 'es' ? 'Datos restaurados' : 'Data restored'),
                 ),
               );
               setState(() {});
@@ -460,9 +419,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 context: context,
                 builder: (context) => AlertDialog(
                   title: Text(_language == 'es' ? 'Confirmar' : 'Confirm'),
-                  content: Text(_language == 'es'
-                      ? '¿Estás seguro de borrar todos los datos?'
-                      : 'Are you sure you want to delete all data?'),
+                  content: Text(
+                    _language == 'es'
+                        ? '¿Estás seguro de que quieres borrar todos los datos? Esto no se puede deshacer.'
+                        : 'Are you sure you want to delete all data? This cannot be undone.',
+                  ),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(context, false),
@@ -470,18 +431,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     TextButton(
                       onPressed: () => Navigator.pop(context, true),
-                      child: Text(_language == 'es' ? 'Confirmar' : 'Confirm'),
+                      child: Text(
+                        _language == 'es' ? 'Borrar' : 'Delete',
+                        style: const TextStyle(color: Colors.red),
+                      ),
                     ),
                   ],
                 ),
               );
               if (confirm == true) {
-                await DatabaseHelper.instance.deleteAllData();
+                await DatabaseHelper.instance.clearDatabase();
+                await NotificationHelper.cancelAllNotifications();
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(_language == 'es'
-                        ? 'Todos los datos han sido borrados'
-                        : 'All data has been deleted'),
+                    content: Text(_language == 'es' ? 'Todos los datos han sido borrados' : 'All data has been deleted'),
                   ),
                 );
                 setState(() {});
