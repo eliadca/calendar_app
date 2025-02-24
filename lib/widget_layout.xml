@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+     Para widgets, es recomendable usar layouts simples 
+     (LinearLayout, FrameLayout) y Views soportadas por RemoteViews.
+     Los elementos que has usado (LinearLayout, TextView, ProgressBar, Button) 
+     sí son compatibles con RemoteViews. 
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="8dp"
+    android:background="@android:color/white">
+
+    <!-- Contenedor de Horas -->
+    <LinearLayout
+        android:id="@+id/hours_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="visible">
+
+        <TextView
+            android:id="@+id/week_hours_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Horas Semanales: 0" />
+
+        <TextView
+            android:id="@+id/month_hours_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Horas Mensuales: 0" />
+
+        <ProgressBar
+            android:id="@+id/month_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100" />
+    </LinearLayout>
+
+    <!-- Contenedor de Notas -->
+    <LinearLayout
+        android:id="@+id/notes_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="8dp"
+        android:visibility="visible">
+
+        <TextView
+            android:id="@+id/notes_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Notas Favoritas" />
+
+        <TextView
+            android:id="@+id/note_1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/note_2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/note_3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+    </LinearLayout>
+
+    <!-- Contenedor de Eventos -->
+    <LinearLayout
+        android:id="@+id/events_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="8dp"
+        android:visibility="visible">
+
+        <TextView
+            android:id="@+id/events_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Eventos Próximos" />
+
+        <TextView
+            android:id="@+id/event_1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/event_2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/event_3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="" />
+    </LinearLayout>
+
+    <!-- Botones de acción en el widget -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <Button
+            android:id="@+id/add_hour_1_button"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="+1h" />
+
+        <Button
+            android:id="@+id/add_hour_30min_button"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="+30min" />
+
+        <Button
+            android:id="@+id/add_note_button"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="Nota" />
+    </LinearLayout>
+</LinearLayout>
