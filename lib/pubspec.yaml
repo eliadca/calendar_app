@@ -1,0 +1,58 @@
+name: calendar_app
+description: A new Flutter project.
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Base de datos
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+  path_provider: ^2.1.4
+
+  # Calendario y notificaciones
+  table_calendar: ^3.1.0
+  flutter_local_notifications: ^17.2.2
+  timezone: ^0.9.2
+
+  # Librerías de UI
+  animated_bottom_navigation_bar: ^1.3.3
+  provider: ^6.1.2
+
+  # Edición de texto y firmas a mano
+  flutter_quill: ^10.7.0
+  hand_signature: ^3.0.0
+
+  # Audio
+  audioplayers: ^6.1.0
+
+  # PDF y compartición
+  pdf: ^3.11.0
+  share_plus: ^10.0.2
+  file_picker: ^8.1.2
+
+  # Home Widget (para el widget en pantalla de inicio)
+  home_widget: ^0.6.0
+
+  # Manejo de permisos (calendario, etc.)
+  permission_handler: ^11.3.1
+
+  # Para gestionar calendarios del dispositivo
+  device_calendar: ^5.0.0
+
+  # Para guardar y leer configuraciones
+  shared_preferences: ^2.1.0
+
+  # Internacionalización
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
