@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from voxforge import analyze, dsp, evaluate, g2p_es, phones, synth   # noqa: E402
+from voxforge import analyze, dsp, evaluate, g2p_es, phones, synth, units   # noqa: E402
 
 TEXT = "Hola, ¿cómo estás? Hoy hace muy buen día para pasear por el parque con todos los amigos."
 
@@ -114,6 +114,87 @@ class Engine(unittest.TestCase):
         import json
         prof, _, _ = analyze.build_profile(self.y, dsp.SR)
         self.assertLess(len(json.dumps(prof, default=float)) / 1024, 40)
+
+
+class Units(unittest.TestCase):
+    """Alignment is tested against ground truth: audio whose phone boundaries we know exactly."""
+
+    SENTS = ["Proponen que la luz polarizada de ciertas estrellas podría haber destruido un tipo de molécula.",
+             "Otras sugieren que ciertos cristales minerales actuaron como plantillas."]
+
+    def _truth_audio(self, text, tempo, noise, seed=3):
+        g = synth.Voice(None, tempo=tempo, seed=seed)
+        rng = np.random.default_rng(seed)
+        segs, ph = g.plan(text)
+        for s in segs:
+            if s["kind"] != "P":
+                s["dur"] *= float(np.exp(rng.normal(0, 0.25)))      # random per-phone timing the template cannot know
+        T = g.tracks(segs, ph)
+        y = g.render(T) + np.random.default_rng(seed).normal(0, noise, T["n"] * dsp.HOP)
+        gt = {}
+        for j, s in enumerate(segs):
+            if s["kind"] != "P":
+                gt.setdefault(s["pid"], [T["t_start"][j], 0])[1] = T["t_start"][j] + s["dur"]
+        return y, gt
+
+    def test_alignment_recovers_boundaries(self):
+        errs = []
+        for text in self.SENTS:
+            y, gt = self._truth_audio(text, tempo=1.0, noise=0.004)
+            fr = analyze.analyze_frames(y)
+            g = synth.Voice(None, tempo=1.4, seed=9)                  # template with a *different* rhythm
+            tr = units.real_tracks(fr, g)
+            mel_r = units.mel_power(y, len(fr["f0"]))
+            floor = max(3 * np.percentile(mel_r.sum(1), 5) / 40, 1e-6)
+            Fr = units.features(mel_r, floor, tr["v"])
+            segs, ph = g.plan(text)
+            T = g.tracks(segs, ph)
+            Ft = units.features(units.mel_power(g.render(T), T["n"]), floor, T["gh"] > 0.5)
+            path, _ = units.dtw(Ft, Fr)
+            gm = units.warp_map(path, T["n"])
+            groups = {}
+            for j, s in enumerate(segs):
+                if s["kind"] != "P":
+                    groups.setdefault(s["pid"], []).append(j)
+            for pid, js in groups.items():
+                a = int(round(T["t_start"][js[0]] / units.DT))
+                b = int(round((T["t_start"][js[-1]] + segs[js[-1]]["dur"]) / units.DT))
+                errs += [abs(gm[a] * units.DT - gt[pid][0]), abs(gm[min(b, T["n"])] * units.DT - gt[pid][1])]
+        errs = np.array(errs) * 1000
+        self.assertLess(np.median(errs), 15)             # ms
+        self.assertGreater((errs < 40).mean(), 0.9)
+
+    def test_unit_bank_and_selection(self):
+        y, _ = self._truth_audio(self.SENTS[0] + " " + self.SENTS[1], tempo=1.0, noise=0.002)
+        prof, yy, fr = analyze.build_profile(y, dsp.SR)
+        v = synth.Voice(prof)
+        n = len(yy) / dsp.SR
+        db, _ = units.build_db(v, yy, fr, [(0.0, n / 2, self.SENTS[0]), (n / 2, n, self.SENTS[1])], verbose=False)
+        self.assertGreater(len(db.units), 80)
+        v.units = db
+        out = v.synthesize("Otras estrellas sugieren que los cristales actuaron como plantillas.")
+        self.assertTrue(np.isfinite(out).all())
+        self.assertGreater(len(out) / dsp.SR, 2.0)
+        # held-out run must never use units of the excluded sentence
+        segs, _ = v.plan(self.SENTS[0])
+        chosen = db.select(segs, exclude={0})
+        self.assertTrue(all(db.units[u]["sent"] != 0 for u in chosen.values()))
+        # round trip through disk
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            db.save(os.path.join(d, "u.npz"))
+            db2 = units.UnitDB.load(os.path.join(d, "u.npz"))
+            self.assertEqual(len(db2.units), len(db.units))
+
+    def test_dispersion_keeps_magnitude_and_reduces_pulsiness(self):
+        v0, v1 = synth.Voice(None, dispersion_ms=0.0), synth.Voice(None, dispersion_ms=2.5)
+        self.assertTrue(np.allclose(np.abs(v1._dispersion()), 1.0))      # all-pass: magnitude untouched
+        y0, y1 = v0.synthesize("La casa de papel."), v1.synthesize("La casa de papel.")
+        def hf_peakiness(y):
+            n = len(y) // 44
+            e = np.abs(np.fft.rfft(y[:n * 44].reshape(n, 44) * np.hanning(44), 64, axis=1))[:, 20:].sum(1)
+            return e.max() / (e.mean() + 1e-12)
+        self.assertLess(hf_peakiness(y1), hf_peakiness(y0))
 
 
 if __name__ == "__main__":

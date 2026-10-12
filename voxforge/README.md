@@ -5,10 +5,10 @@ Aprende tu voz desde un WAV de 20 s, guarda un perfil de **~7 kB** y habla espa�
 **~50× más rápido que tiempo real en CPU**.
 
 ```bash
-python -m voxforge clone  mi_voz.wav -o voz.json          # aprende el perfil (2 s)
+python -m voxforge clone  mi_voz.wav --transcript mi_voz.tsv -o voz.json   # perfil + banco de unidades reales
 python -m voxforge speak  voz.json "Hola, ¿cómo estás?" -o hola.wav
-python -m voxforge report mi_voz.wav -o out                # clona + batería completa de pruebas
-python -m unittest discover -s tests                       # 11 tests
+python -m voxforge report mi_voz.wav --transcript mi_voz.tsv -o out         # clona + batería completa de pruebas
+python -m unittest discover -s tests                                        # 14 tests
 ```
 
 ## Cómo funciona (lo que es nuevo aquí)
@@ -19,41 +19,46 @@ python -m unittest discover -s tests                       # 11 tests
 | Perfil | F0, vocales **descubiertas por clustering** semillado con las 5 del español, ecualizador residual, ruido de /s/ medido, ritmo | `analyze.build_profile` |
 | Texto | G2P del español por reglas (acentos, diptongos, silabeo, números) – sin diccionario | `g2p_es.py` |
 | Prosodia | contorno de F0 por frase (declinación, acentos, subida en preguntas), alargamiento final | `synth.f0_contour` |
-| Motor | **respuestas al impulso de fase mínima, pitch‑síncronas**, con retardo fraccionario exacto + ruido en STFT; ambos filtrados por *tu* envolvente | `synth.render` |
+| Alineación | plantilla sintética de la transcripción + **DTW** (MFCC + sonoridad) → límites de fonema reales, sin ASR | `units.build_db` |
+| Unidades | cada fonema de tu grabación guarda *tus* trayectorias reales (envolvente, ruido, sonoridad, F0); selección por **Viterbi** (coste de contexto + coste de unión) | `units.UnitDB` |
+| Motor | **respuestas al impulso de fase mínima, pitch‑síncronas**, retardo fraccionario exacto, **dispersión de fase** (anti‑zumbido) + ruido en STFT; todo filtrado por *tu* envolvente | `synth.render` |
 
 Todo lo específico de tu voz se calibra por **análisis‑por‑síntesis** (se mide con la misma función en tu audio
 y en el sintetizado, así el sesgo del medidor se cancela): tempo, contraste de formantes, ecualización.
 
-## Resultados medidos (tu `audioclone.wav`)
+## Resultados medidos (tu `audioclone.wav`, transcrito)
 
-Reproducibles con `python -m voxforge report`; ver `out/report.md`.
+Reproducibles con `python -m voxforge report mi_voz.wav --transcript mi_voz.tsv`; ver `out/report.md`.
 
 | prueba | resultado |
 |---|---|
-| Copy‑synthesis de tu audio (fidelidad del motor) | distancia log‑mel **4.2 dB** (control con audio desalineado: 23 dB) |
-| Pitch de esa copia | error mediano **19 cents**, voz/sorda coinciden en 93 % |
-| Timbre TTS vs. tu voz | **2.8 dB** (voz genérica sin clonar: 9.5 dB) |
-| **Generalización**: perfil de la 1ª mitad vs. 2ª mitad nunca vista | **3.3 dB** (genérica: 9.7 dB) |
-| Vocales sintetizadas distinguibles | **100 %** (5/5) |
-| Velocidad | copy‑synth 45×, TTS 55× tiempo real; perfil 7 kB |
+| Copy‑synthesis (fidelidad del motor) | log‑mel **4.5 dB** (4.2 sin dispersión de fase; control desalineado 23 dB); F0 19 cents |
+| Timbre del texto→voz (reglas) vs. tu voz | **3.1 dB** (voz genérica: 8.1 dB); generalización a mitad no vista: 3.3 dB |
+| Alineación vs. verdad conocida (sintético, con ruido y desajuste de EQ) | error mediano **~3 ms**, 99 % < 20 ms |
+| Alineación en tu audio real (sin verdad disponible) | vocales sonoras 90 %, /s/ sordas 96 % |
+| Unidades vs. tu grabación, **frase que está en el banco** | distancia **16.6** (reglas: 33.4) → casi la mitad |
+| Unidades vs. tu grabación, **texto nuevo** (frase retenida) | **30.5** (reglas: 33.4) → mejora **modesta (~9 %)** |
+| Banco + perfil | 574 kB + 7.7 kB; ~50× tiempo real |
 
-## Límites reales (leer esto)
+### Lo que NO está resuelto
 
-- **No rivaliza todavía con ElevenLabs.** Esas métricas miden timbre, pitch y espectro; **no miden naturalidad ni
-  inteligibilidad** — para eso hay que escuchar. Este sintetizador es paramétrico: suena a voz sintética limpia
-  con tu timbre, no a grabación humana.
-- Comparado con tu grabación (ver `out/spec_*.png`): tu habla es más *legato* y tiene ruido de sala; la síntesis
-  es más silábica, con huecos marcados en las consonantes y silencio digital en las pausas.
-- Un solo hablante, un solo clip de 20 s, sin transcripción. En tu habla rápida /a/ y /o/ colapsan, así que el
-  perfil se mezcla con el modelo teórico de vocales (`articulation=0.6`): se pierde algo de fidelidad por inteligibilidad.
-- Consonantes y duraciones son **reglas**, no datos tuyos. El aspecto «recortado» de /p t k/ viene de ahí.
+- **«100 % exacto» solo se cumple para lo que ya dijiste**: re‑sintetizar una frase del banco queda a la mitad de
+  distancia de las reglas. Para texto nuevo, con 4 frases de datos solo el **18 %** de los fonemas encuentra una unidad
+  con *ambos* vecinos iguales a lo que se necesita; el resto se pega con vecinos distintos. Es un límite de **datos**,
+  no del método: con el guion de abajo (70 frases) la cobertura sube drásticamente.
+- Las métricas objetivas no miden naturalidad. Lo que decide es escuchar.
+- La dispersión de fase iguala la «impulsividad» de pulso de tu voz (nuestro indicador), pero baja un poco la
+  distancia log‑mel (4.2→4.5 dB): se cambia fidelidad espectral por menos zumbido. `dispersion_ms=0` la desactiva.
+- Consonantes sin unidad real (p. ej. /b/, /g/, /ŋ/, /r/ en tus datos) caen a reglas y suenan más artificiales.
 
-## Camino hacia la calidad profesional (sin redes gigantes)
+## Cómo llegar de verdad a calidad profesional
 
-1. **Alineación gratis**: con una transcripción, alinear tu audio con la propia síntesis por DTW sobre cepstros
-   (sin ASR) → etiquetas de fonema → aprender trayectorias de envolvente, duraciones y F0 *por fonema* de tus datos.
-2. Regresor de prosodia diminuto (cientos de parámetros) entrenado con ese F0 alineado.
-3. Forma de pulso glotal / dispersión de fase para quitar el «zumbido» de la fase mínima + ruido de sala medido.
-4. Port a Dart/JS (todo es FFT + convoluciones simples) para usarlo dentro de la app Flutter.
+1. Graba el guion `samples/recording_script.txt` (70 frases, ~5.5 min, cubre 93 % de fonemas‑en‑contexto de un
+   corpus variado; cada fonema ≥ 11 veces). Una sola toma larga, 0.7 s de silencio entre frases, mismo micro y
+   distancia, sala silenciosa.
+2. `python tools/split_by_script.py grabacion.wav samples/recording_script.txt -o samples/mi_voz.tsv`
+   (sin transcribir a mano: el guion *es* la transcripción).
+3. `python -m voxforge clone grabacion.wav --transcript samples/mi_voz.tsv -o voz.json`.
 
-Lo que más mueve la aguja: **más audio de tu voz con su texto** (5–10 min).
+Siguientes mejoras de motor: regresor de prosodia diminuto sobre el F0 alineado, selección con coste de unión
+espectral más fino, ruido de sala medido en las pausas, port a Dart/JS para la app Flutter.

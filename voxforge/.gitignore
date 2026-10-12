@@ -1,4 +1,5 @@
 __pycache__/
 *.pyc
-# raw reference recording is the speaker's private data: never commit it
+# raw recordings of the speaker are private data: never commit them
 out/reference_22k.wav
+out/real_S2.wav

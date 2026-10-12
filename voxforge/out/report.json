@@ -1,5 +1,5 @@
 {
- "clone_seconds": 2.2106447219848633,
+ "clone_seconds": 2.2835302352905273,
  "profile_kB": 7.033203125,
  "profile": {
   "f0": {
@@ -28,16 +28,17 @@
   }
  },
  "copy_synthesis": {
-  "logmel_distance_db": 4.208892909890508,
-  "mean_abs_band_bias_db": 0.3879028405592558,
+  "logmel_distance_db": 4.457591286597242,
+  "mean_abs_band_bias_db": 0.8669981173277816,
   "f0": {
-   "rmse_cents": 65.92510773382634,
-   "median_abs_cents": 18.98161383727677,
-   "voicing_agreement": 0.9279279279279279,
-   "frames": 1951
+   "rmse_cents": 65.92949799620618,
+   "median_abs_cents": 18.621983800931176,
+   "voicing_agreement": 0.9281781781781782,
+   "frames": 1950
   },
-  "realtime_factor": 45.17393366288553,
-  "control_shifted_reference_db": 22.9578476084869
+  "realtime_factor": 50.14359715872702,
+  "control_shifted_reference_db": 22.9578476084869,
+  "logmel_nodispersion_db": 4.208892909890508
  },
  "reference": {
   "f0_median": 121.67862277988466,
@@ -46,101 +47,120 @@
  "tts": {
   "saludo": {
    "text": "Hola, \u00bfc\u00f3mo est\u00e1s? Esta es mi voz sint\u00e9tica, hecha completamente con c\u00f3digo.",
-   "seconds": 5.587301587301587,
+   "seconds": 5.667120181405895,
    "clone": {
-    "f0_median": 122.45188803501907,
-    "f0_sd_st": 2.817803021396962,
-    "ltas_dist_db": 2.30636904469449,
-    "band_err_db": 1.8056102588804026
+    "f0_median": 122.26123107374828,
+    "f0_sd_st": 2.732974669994413,
+    "ltas_dist_db": 2.3825076497472915,
+    "band_err_db": 1.902640946502828
    },
    "generic": {
-    "f0_median": 119.00164531971015,
-    "f0_sd_st": 2.2286030361859375,
-    "ltas_dist_db": 9.681074668071984,
-    "band_err_db": 12.614551903835197
+    "f0_median": 119.0059963565121,
+    "f0_sd_st": 2.2293844880636726,
+    "ltas_dist_db": 8.38887674638362,
+    "band_err_db": 9.874679568636079
    }
   },
   "pangrama": {
    "text": "El veloz murci\u00e9lago hind\u00fa com\u00eda feliz cardillo y kiwi, mientras la cig\u00fce\u00f1a tocaba el saxof\u00f3n detr\u00e1s del palenque.",
-   "seconds": 6.4353741496598635,
+   "seconds": 6.555102040816327,
    "clone": {
-    "f0_median": 123.74318244404083,
-    "f0_sd_st": 2.209191835088965,
-    "ltas_dist_db": 2.951903289135876,
-    "band_err_db": 1.547382379670427
+    "f0_median": 123.63271299960405,
+    "f0_sd_st": 2.114133405640151,
+    "ltas_dist_db": 3.152725262379782,
+    "band_err_db": 1.5462858138116573
    },
    "generic": {
-    "f0_median": 118.72422526064562,
-    "f0_sd_st": 1.8378450213749062,
-    "ltas_dist_db": 9.160903538013528,
-    "band_err_db": 12.894370896166643
+    "f0_median": 118.55304956397177,
+    "f0_sd_st": 1.7595198009631758,
+    "ltas_dist_db": 7.9207394448074595,
+    "band_err_db": 10.38130517475456
    }
   },
   "numeros": {
    "text": "Hoy es doce de octubre, y son las tres y veinte de la tarde. Quedan quinientos cuarenta y siete d\u00edas.",
-   "seconds": 5.976417233560091,
+   "seconds": 6.0712018140589565,
    "clone": {
-    "f0_median": 123.03963105074135,
-    "f0_sd_st": 2.2798921399276,
-    "ltas_dist_db": 2.7970601192898883,
-    "band_err_db": 1.0107324509638127
+    "f0_median": 123.28113611013916,
+    "f0_sd_st": 2.18737596662432,
+    "ltas_dist_db": 3.117959474828242,
+    "band_err_db": 1.0732731456565017
    },
    "generic": {
-    "f0_median": 119.00970630106511,
-    "f0_sd_st": 1.9501936040144177,
-    "ltas_dist_db": 9.561473780568836,
-    "band_err_db": 13.141781278041309
+    "f0_median": 119.00387104341253,
+    "f0_sd_st": 1.9447894378417097,
+    "ltas_dist_db": 8.176127719888017,
+    "band_err_db": 10.31420108913773
    }
   },
   "pregunta": {
    "text": "\u00bfPuedes creer que una voz entera cabe en menos de treinta kilobytes?",
-   "seconds": 3.980952380952381,
+   "seconds": 4.045804988662131,
    "clone": {
-    "f0_median": 121.83942016972439,
-    "f0_sd_st": 2.299673974363641,
-    "ltas_dist_db": 3.08756266839434,
-    "band_err_db": 0.8882107768722532
+    "f0_median": 121.95894361677676,
+    "f0_sd_st": 2.1435504734777444,
+    "ltas_dist_db": 3.54401451651321,
+    "band_err_db": 0.7551182570633971
    },
    "generic": {
-    "f0_median": 118.52324065387145,
-    "f0_sd_st": 1.8553268746330567,
-    "ltas_dist_db": 9.559285749222012,
-    "band_err_db": 13.364528601669491
+    "f0_median": 118.51533956863015,
+    "f0_sd_st": 1.8558718870568283,
+    "ltas_dist_db": 8.153209876936478,
+    "band_err_db": 10.358075079985364
    }
   },
   "trabalenguas": {
    "text": "Tres tristes tigres tragaban trigo en un trigal, y el perro de San Roque no tiene rabo.",
-   "seconds": 4.958730158730159,
+   "seconds": 5.048526077097506,
    "clone": {
-    "f0_median": 122.0770977360689,
-    "f0_sd_st": 2.3290579582861017,
-    "ltas_dist_db": 2.7009261722779025,
-    "band_err_db": 3.337834757926419
+    "f0_median": 123.4562783398752,
+    "f0_sd_st": 2.260222859242258,
+    "ltas_dist_db": 3.0569889836121176,
+    "band_err_db": 3.5617832256488526
    },
    "generic": {
-    "f0_median": 118.75955999267907,
-    "f0_sd_st": 2.029800328723269,
-    "ltas_dist_db": 9.34763836192599,
-    "band_err_db": 12.776886229484246
+    "f0_median": 118.74476719242212,
+    "f0_sd_st": 2.026428813320479,
+    "ltas_dist_db": 8.021950636344252,
+    "band_err_db": 10.035849321529188
    }
   }
  },
  "tts_summary": {
-  "ltas_dist_clone_db": 2.7687642587584995,
-  "ltas_dist_generic_db": 9.46207521956047,
-  "band_err_clone_db": 1.717954124862663,
-  "band_err_generic_db": 12.958423781839377,
-  "f0_median_clone": 122.6302438871189,
-  "f0_median_generic": 118.80367550559428,
-  "realtime_factor": 55.02421237515566,
-  "audio_seconds": 26.93877551020408
+  "ltas_dist_clone_db": 3.0508391774161283,
+  "ltas_dist_generic_db": 8.132180884871966,
+  "band_err_clone_db": 1.7678202777366472,
+  "band_err_generic_db": 10.192822046808583,
+  "f0_median_clone": 122.91806042802868,
+  "f0_median_generic": 118.76460474498974,
+  "realtime_factor": 56.06521066103938,
+  "audio_seconds": 27.387755102040813
  },
  "held_out": {
-  "clone_first_half": 3.31831583372448,
-  "generic": 9.699279624222637,
-  "clone_full_in_sample": 3.1230985362660424,
+  "clone_first_half": 3.262986474351293,
+  "generic": 8.370669809874638,
+  "clone_full_in_sample": 3.3047457191378555,
   "f0_median_second_half": 129.59809686332233,
   "f0_median_clone_first_half": 114.76110121688981
+ },
+ "units": {
+  "build_seconds": 1.6012444496154785,
+  "n_units": 295,
+  "n_sentences": 4,
+  "bank_kB": 574.150390625,
+  "align_sanity": {
+   "vowel_units_voiced": 0.9022724642024642,
+   "s_units_voiced": 0.040232853160484736
+  },
+  "distance_to_real": {
+   "rules": 33.438785552978516,
+   "units_held_out": 30.49700403213501,
+   "units_in_sample": 16.57453942298889
+  },
+  "coverage_held_out": {
+   "phones_with_unit": 0.9828030572342694,
+   "both_neighbours_match": 0.18717861191421448
+  }
  },
  "vowel_accuracy_vs_textbook": 1.0,
  "vowel_confusion": [

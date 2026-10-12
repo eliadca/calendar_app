@@ -3,7 +3,7 @@ import json
 import os
 import time
 import numpy as np
-from . import analyze, dsp, evaluate, phones, synth, viz
+from . import analyze, dsp, evaluate, phones, synth, units as units_mod, viz
 from .dsp import SR
 
 TEXTS = {
@@ -38,7 +38,7 @@ def _vowel_accuracy(voice):
     return hits / max(total, 1), conf
 
 
-def run(wav_path, outdir):
+def run(wav_path, outdir, transcript=None):
     os.makedirs(outdir, exist_ok=True)
     rep = {}
     x, sr = dsp.read_wav(wav_path)
@@ -66,6 +66,11 @@ def run(wav_path, outdir):
     rep["copy_synthesis"]["control_shifted_reference_db"] = evaluate.mel_distance(y_ref, sh)[0]
     dsp.write_wav(os.path.join(outdir, "reference_22k.wav"), y_ref)
     dsp.write_wav(os.path.join(outdir, "copy_synthesis.wav"), y_copy)
+    # A/B: previous impulsive vocoder (no phase dispersion) -> more "buzz"
+    y_buzz = synth.copy_synthesis(fr, synth.Voice(prof, dispersion_ms=0.0), len(y_ref))
+    y_buzz *= np.sqrt((y_ref ** 2).sum() / (y_buzz ** 2).sum())
+    dsp.write_wav(os.path.join(outdir, "copy_synthesis_nodispersion.wav"), y_buzz)
+    rep["copy_synthesis"]["logmel_nodispersion_db"] = evaluate.mel_distance(y_ref, y_buzz)[0]
 
     # ---- B. text-to-speech samples + speaker similarity vs. reference and vs. generic baseline
     ref_stats = evaluate.speaker_stats(y_ref)
@@ -117,6 +122,10 @@ def run(wav_path, outdir):
     rep["held_out"]["f0_median_second_half"] = st2["f0_median"]
     rep["held_out"]["f0_median_clone_first_half"] = p1["f0"]["median"]
 
+    # ---- B3. recorded-unit bank (needs a transcript)
+    if transcript:
+        rep["units"] = _unit_tests(prof, y_ref, fr, transcript, outdir, ref_stats)
+
     # ---- C. vowel discriminability
     acc, conf = _vowel_accuracy(voice)
     rep["vowel_accuracy_vs_textbook"] = acc
@@ -126,6 +135,66 @@ def run(wav_path, outdir):
         json.dump(rep, f, indent=1, default=float)
     _write_md(rep, outdir)
     return rep
+
+
+def _unit_tests(prof, y_ref, fr, transcript, outdir, ref_stats):
+    sents = units_mod.read_transcript(transcript)
+    vb = synth.Voice(prof)
+    t0 = time.time()
+    db, _ = units_mod.build_db(vb, y_ref, fr, sents, verbose=False)
+    out = dict(build_seconds=time.time() - t0, n_units=len(db.units), n_sentences=len(sents))
+    db.save(os.path.join(outdir, "voice.units.npz"))
+    out["bank_kB"] = os.path.getsize(os.path.join(outdir, "voice.units.npz")) / 1024
+    prof["dur_scale"] = vb.dur_scale                      # keep profile and bank consistent on disk
+    analyze.save_profile(prof, os.path.join(outdir, "voice.json"))
+    p2 = dict(prof)
+    vu = synth.Voice(p2)
+    vu.units = db
+    # alignment sanity on the REAL recording (independent evidence the phone boundaries are meaningful)
+    vow = [np.mean(db.t["gh"][u["a"]:u["b"]]) for u in db.units if u["phone"] in "aeiou"]
+    sv = [np.mean(db.t["gh"][u["a"]:u["b"]]) for u in db.units if u["phone"] == "s"]
+    out["align_sanity"] = dict(vowel_units_voiced=float(np.mean(vow)), s_units_voiced=float(np.mean(sv)) if sv else None)
+    # leave-one-sentence-out distance to the real recording
+    n_real = len(fr["f0"])
+    mel_r = units_mod.mel_power(y_ref, n_real)
+    floor = max(3 * np.percentile(mel_r.sum(1), 5) / 40, 1e-6)
+
+    def dist(ys, r0, r1):
+        ns = len(ys) // dsp.HOP
+        Fs = units_mod.features(units_mod.mel_power(ys, ns), floor, np.zeros(ns, bool))
+        Fr = units_mod.features(mel_r[r0:r1], floor, np.zeros(r1 - r0, bool))
+        return units_mod.dtw(Fs, Fr)[1]
+
+    rows, cov = [], []
+    for k, (t0_, t1_, text) in enumerate(sents):
+        r0, r1 = int(t0_ / (dsp.HOP / dsp.SR)), min(n_real, int(t1_ / (dsp.HOP / dsp.SR)))
+        y_rule = vu.synthesize(text, use_units=False)
+        y_held = vu.synthesize(text, exclude={k})
+        y_in = vu.synthesize(text)
+        segs, _ = vu.plan(text)
+        ch = db.select(segs, {k})
+        pids = {s["pid"]: s for s in segs if s["kind"] != "P"}
+        both = sum(1 for p, ui in ch.items() if db.units[ui]["prev"] == pids[p]["prev"] and db.units[ui]["next"] == pids[p]["next"])
+        cov.append((len(ch) / len(pids), both / len(pids)))
+        rows.append((dist(y_rule, r0, r1), dist(y_held, r0, r1), dist(y_in, r0, r1)))
+        if k == 1:
+            dsp.write_wav(os.path.join(outdir, "unit_heldout_S2.wav"), y_held)
+            dsp.write_wav(os.path.join(outdir, "rules_S2.wav"), y_rule)
+            dsp.write_wav(os.path.join(outdir, "unit_insample_S2.wav"), y_in)
+            dsp.write_wav(os.path.join(outdir, "real_S2.wav"), y_ref[int(t0_ * dsp.SR):int(t1_ * dsp.SR)])
+    rows = np.array(rows)
+    out["distance_to_real"] = dict(rules=float(rows[:, 0].mean()), units_held_out=float(rows[:, 1].mean()),
+                                   units_in_sample=float(rows[:, 2].mean()))
+    out["coverage_held_out"] = dict(phones_with_unit=float(np.mean([c[0] for c in cov])),
+                                    both_neighbours_match=float(np.mean([c[1] for c in cov])))
+    # new-text demos
+    demos = {"nuevo1": "Hola, ¿cómo estás? Ciertos cristales minerales actuaron como plantillas.",
+             "nuevo2": "Otras estrellas sugieren que la preferencia se pasa de una molécula a otra."}
+    for name, text in demos.items():
+        dsp.write_wav(os.path.join(outdir, "unit_%s.wav" % name), vu.synthesize(text))
+    for name, text in TEXTS.items():
+        dsp.write_wav(os.path.join(outdir, "unit_%s.wav" % name), vu.synthesize(text))
+    return out
 
 
 def _write_md(r, outdir):
@@ -160,6 +229,20 @@ def _write_md(r, outdir):
     L.append("| voz genérica sin clonar | %.2f |\n" % h["generic"])
     L.append("## 4. Discriminabilidad de vocales sintetizadas\n")
     L.append("Clasificación de /a e i o u/ sintetizadas frente a las vocales teóricas del español ecualizadas con tu voz: **%.0f%%**\n" % (100 * r["vowel_accuracy_vs_textbook"]))
+    if "units" in r:
+        u = r["units"]
+        d = u["distance_to_real"]
+        L.append("## 4b. Banco de unidades reales (con transcripción)\n")
+        L.append("- %d unidades de %d frases, banco de **%.0f kB**, construido en %.1f s" % (u["n_units"], u["n_sentences"], u["bank_kB"], u["build_seconds"]))
+        L.append("- Sanidad de la alineación sobre tu grabación real: vocales sonoras %.0f %%, /s/ sordas %.0f %%" % (
+            100 * u["align_sanity"]["vowel_units_voiced"], 100 * (1 - (u["align_sanity"]["s_units_voiced"] or 0))))
+        L.append("\n**Distancia a tu grabación real, frase retenida** (menor = más cercano; otra frase tuya distinta ≈ 44):\n")
+        L.append("| método | distancia |\n|---|---|")
+        L.append("| reglas (sin unidades) | %.1f |" % d["rules"])
+        L.append("| unidades, texto NUEVO (frase retenida del banco) | **%.1f** |" % d["units_held_out"])
+        L.append("| unidades, texto que está en el banco | **%.1f** |\n" % d["units_in_sample"])
+        c = u["coverage_held_out"]
+        L.append("Cobertura con texto nuevo: %.0f %% de los fonemas hallan unidad real, pero solo **%.0f %%** con ambos vecinos iguales (los datos son escasos).\n" % (100 * c["phones_with_unit"], 100 * c["both_neighbours_match"]))
     L.append("## 5. Audios generados\n")
     for k, v in r["tts"].items():
         L.append("- `tts_%s.wav` (clon) / `generic_%s.wav` (sin clonar): «%s»" % (k, k, v["text"]))

@@ -25,11 +25,12 @@ def _smooth(x):
 
 class Voice:
     def __init__(self, profile=None, tempo=None, seseo=True, seed=1, aspiration=None, expressiveness=1.0,
-                 clarity=1.25, sharpen=1.0, articulation=0.6):
+                 clarity=1.25, sharpen=1.0, articulation=0.6, dispersion_ms=2.5):
         self.profile = profile
         self.rng = np.random.default_rng(seed)
         self.seseo = seseo
         self.expr = expressiveness
+        self.dispersion_ms = dispersion_ms
         f0 = (profile or {}).get("f0", dict(median=118.0, sd_semitones=3.5, jitter=0.004))
         self.f0_med = f0["median"]
         self.f0_sd = float(np.clip(f0["sd_semitones"], 2.5, 5.0))
@@ -73,6 +74,9 @@ class Voice:
         self.hf_cep = dsp.logmag_to_cep(_db(hf_db)[None, :])[0]
         self.hf_cep[0] = 0.0
         self.cache = {}
+        self.dur_scale = dict((profile or {}).get("dur_scale", {}))
+        self.units = None
+        self.unit_tempo = 1.0
         if self._auto_tempo:
             self.calibrate_tempo(profile["syll_rate"])
 
@@ -116,7 +120,7 @@ class Voice:
         segs, phrases = [], []
         cur = dict(start=None, kind=".", nuclei=[])
         segs.append(self._pause(0.12))
-        words_phones = []
+        pid = 0
         for ti, t in enumerate(toks):
             if t["type"] == "punct":
                 if segs and segs[-1]["kind"] != "P":
@@ -133,9 +137,13 @@ class Voice:
                 prev_p = P[k - 1]["p"] if k > 0 else ("_" if True else None)
                 next_p = P[k + 1]["p"] if k + 1 < len(P) else "_"
                 new = self._phone_segs(d, prev_p, next_p, func)
+                if new:
+                    pid += 1
                 for s in new:
                     s["word"] = t["word"]
                     s["syl_last"] = d["syl"] == last_syl
+                    s["pid"], s["phone"], s["pstress"] = pid, d["p"], bool(d["stress"])
+                    s["wpos"] = "i" if k == 0 else ("f" if k == len(P) - 1 else "m")
                     if cur["start"] is None:
                         cur["start"] = len(segs)
                     segs.append(s)
@@ -146,7 +154,31 @@ class Voice:
         segs.append(self._pause(0.18))
         self._fill_obstruent_envelopes(segs)
         self._durations(segs, phrases)
+        if self.dur_scale:
+            for sg in segs:
+                if sg["kind"] != "P":
+                    sg["dur"] *= self.dur_scale.get(sg.get("phone"), 1.0)
+        self._annotate(segs)
         return segs, phrases
+
+    @staticmethod
+    def _annotate(segs):
+        """Neighbour phones (pause -> '_') and phrase-final flag for every phone group."""
+        order = []
+        for i, s in enumerate(segs):
+            if s["kind"] == "P":
+                order.append(("_", None))
+            elif not order or order[-1][1] != s["pid"]:
+                order.append((s["phone"], s["pid"]))
+        idx = {pid: k for k, (ph_, pid) in enumerate(order) if pid is not None}
+        for s in segs:
+            if s["kind"] == "P":
+                s["pid"], s["phone"], s["prev"], s["next"], s["pfinal"] = -1, "_", "_", "_", False
+                continue
+            k = idx[s["pid"]]
+            s["prev"] = order[k - 1][0] if k > 0 else "_"
+            s["next"] = order[k + 1][0] if k + 1 < len(order) else "_"
+            s["pfinal"] = s["next"] == "_" and s.get("syl_last", False)
 
     def _pause(self, d):
         z = np.zeros(NCEP)
@@ -308,6 +340,41 @@ class Voice:
         f0_st = np.convolve(np.pad(f0_st, 4, mode="edge"), k, "valid")
         return self.f0_med * 2.0 ** (f0_st / 12.0)
 
+    # ------------------------------------------------------------- units
+    def apply_units(self, segs, phrases, exclude=()):
+        """Replace rule-based phone groups by the speaker's real recorded units (where the DB has candidates)."""
+        db = self.units
+        chosen = db.select(segs, exclude)
+        out, newidx, i = [], {}, 0
+        while i < len(segs):
+            s = segs[i]
+            pid = s["pid"]
+            if s["kind"] == "P" or pid not in chosen:
+                newidx[i] = len(out)
+                out.append(s)
+                i += 1
+                continue
+            j = i
+            while j < len(segs) and segs[j]["pid"] == pid:
+                j += 1
+            u = db.units[chosen[pid]]
+            sl = slice(u["a"], u["b"])
+            fr = dict(ch=db.t["ch"][sl], cn=db.t["cn"][sl], gh=db.t["gh"][sl], gn=db.t["gn"][sl], f0=db.t["f0"][sl])
+            kind = "V" if s["phone"] in ph.VOWELS else "U"
+            seg = dict(kind=kind, ph=s["phone"], phone=s["phone"], pid=pid, dur=len(fr["gh"]) * DT / self.unit_tempo,
+                       frames=fr, stress=s.get("pstress", False), word=s.get("word"), unit=chosen[pid],
+                       ch=fr["ch"][0], cn=fr["cn"][0], gh=fr["gh"][0], gn=fr["gn"][0],
+                       edge0=dict(ch=fr["ch"][0], cn=fr["cn"][0], gh=fr["gh"][0], gn=fr["gn"][0]),
+                       edge1=dict(ch=fr["ch"][-1], cn=fr["cn"][-1], gh=fr["gh"][-1], gn=fr["gn"][-1]))
+            for k in range(i, j):
+                newidx[k] = len(out)
+            out.append(seg)
+            i = j
+        for pr in phrases:
+            pr["nuclei"] = [newidx[k] for k in pr["nuclei"]]
+            pr["start"] = newidx[pr["start"]]
+        return out, phrases
+
     # ------------------------------------------------------------- tracks
     def tracks(self, segs, phrases):
         durs = np.array([s["dur"] for s in segs])
@@ -319,34 +386,47 @@ class Voice:
         cn = np.array([s["cn"] for s in segs])[seg_idx]
         gh = np.array([s["gh"] for s in segs])[seg_idx].astype(float)
         gn = np.array([s["gn"] for s in segs])[seg_idx].astype(float)
+        # recorded units carry their own per-frame trajectories
+        for j, s in enumerate(segs):
+            if "frames" not in s:
+                continue
+            lo, hi = int(round(t_start[j] / DT)), min(n, int(round((t_start[j] + s["dur"]) / DT)))
+            if hi <= lo:
+                continue
+            fr = s["frames"]
+            k = len(fr["gh"])
+            pos = np.linspace(0, k - 1, hi - lo)
+            i0 = np.floor(pos).astype(int)
+            i1 = np.minimum(i0 + 1, k - 1)
+            w = (pos - i0)[:, None]
+            ch[lo:hi] = fr["ch"][i0] * (1 - w) + fr["ch"][i1] * w
+            cn[lo:hi] = fr["cn"][i0] * (1 - w) + fr["cn"][i1] * w
+            gh[lo:hi] = fr["gh"][i0] * (1 - w[:, 0]) + fr["gh"][i1] * w[:, 0]
+            gn[lo:hi] = fr["gn"][i0] * (1 - w[:, 0]) + fr["gn"][i1] * w[:, 0]
         # smooth the boundaries
-        kinds = [s["kind"] for s in segs]
         for j in range(len(segs) - 1):
             a, b = segs[j], segs[j + 1]
             tb = t_start[j + 1]
-            sharp = {"C", "B", "A", "P", "F"}
-            we = min(0.040, 0.9 * min(a["dur"], b["dur"]))
-            wg = 0.008 if (a["kind"] in sharp or b["kind"] in sharp) else min(0.022, 0.9 * min(a["dur"], b["dur"]))
-            if a["kind"] == "B" or b["kind"] == "B":
-                wg = 0.003
-            if a["kind"] == "F" and b["kind"] in ("V", "S"):
-                wg = 0.018
-            for width, arrs in ((we, (ch,)), (wg, (gh, gn, cn))):
+            if "frames" in a and "frames" in b:
+                we = wg = 0.014                                   # recorded -> recorded: already co-articulated
+            else:
+                sharp = {"C", "B", "A", "P", "F"}
+                we = min(0.040, 0.9 * min(a["dur"], b["dur"]))
+                wg = 0.008 if (a["kind"] in sharp or b["kind"] in sharp) else min(0.022, 0.9 * min(a["dur"], b["dur"]))
+                if a["kind"] == "B" or b["kind"] == "B":
+                    wg = 0.003
+                if a["kind"] == "F" and b["kind"] in ("V", "S"):
+                    wg = 0.018
+            ea, eb = a.get("edge1", a), b.get("edge0", b)
+            for width, names in ((we, ("ch",)), (wg, ("gh", "gn", "cn"))):
                 lo, hi = int((tb - width / 2) / DT), int((tb + width / 2) / DT) + 1
                 lo, hi = max(lo, 0), min(hi, n)
                 if hi <= lo:
                     continue
                 w = _smooth((ts[lo:hi] - (tb - width / 2)) / max(width, 1e-6))
-                for arr in arrs:
-                    A = {"ch": a["ch"], "cn": a["cn"], "gh": a["gh"], "gn": a["gn"]}
-                    if arr is ch:
-                        va, vb = a["ch"], b["ch"]
-                    elif arr is cn:
-                        va, vb = a["cn"], b["cn"]
-                    elif arr is gh:
-                        va, vb = a["gh"], b["gh"]
-                    else:
-                        va, vb = a["gn"], b["gn"]
+                for name in names:
+                    arr = {"ch": ch, "cn": cn, "gh": gh, "gn": gn}[name]
+                    va, vb = ea[name], eb[name]
                     if arr.ndim == 2:
                         arr[lo:hi] = va[None, :] * (1 - w[:, None]) + vb[None, :] * w[:, None]
                     else:
@@ -358,10 +438,70 @@ class Voice:
                 tt = ts[lo:hi] - t_start[j]
                 gh[lo:hi] *= 0.12 + 0.88 * (0.5 + 0.5 * np.cos(2 * np.pi * s["trill"] * tt)) ** 1.5
         f0 = self.f0_contour(segs, phrases, t_start, n)
+        if any("frames" in s for s in segs):
+            f0 = self._unit_f0(segs, phrases, t_start, n, f0)
         voiced = gh > 0.5
-        if voiced.sum() > 20:            # centre the contour so the *voiced* median equals the speaker's median
-            f0 = f0 * (self.f0_med / np.median(f0[voiced]))
+        if voiced.sum() > 20 and not any("frames" in s for s in segs):
+            f0 = f0 * (self.f0_med / np.median(f0[voiced]))     # centre rule-based contour on the speaker's median
         return dict(ch=ch, cn=cn, gh=gh, gn=gn, f0=f0, n=n, t_start=t_start)
+
+    def _unit_f0(self, segs, phrases, t_start, n, rule_f0):
+        """Use the recorded F0 of the chosen units (their natural micro-intonation), glued without jumps."""
+        st = 12 * np.log2(rule_f0 / self.f0_med)
+        prev_end = None
+        for j, s in enumerate(segs):
+            if "frames" not in s:
+                prev_end = None
+                continue
+            lo, hi = int(round(t_start[j] / DT)), min(n, int(round((t_start[j] + s["dur"]) / DT)))
+            if hi <= lo:
+                continue
+            u = 12 * np.log2(np.maximum(s["frames"]["f0"], 40.0) / self.f0_med)
+            pos = np.linspace(0, len(u) - 1, hi - lo)
+            u = np.interp(pos, np.arange(len(u)), u)
+            if prev_end is not None:
+                off = 0.8 * (prev_end - u[0])
+                u = u + off * np.linspace(1.0, 0.0, len(u)) ** 0.6
+            st[lo:hi] = u
+            prev_end = u[-1]
+        # questions: rise through the post-tonic syllables
+        for pr in phrases:
+            if pr["kind"] != "?" or not pr["nuclei"]:
+                continue
+            nuc = pr["nuclei"]
+            stressed = [k for k in nuc if segs[k].get("stress")]
+            k0 = stressed[-1] if stressed else nuc[-1]
+            lo = int((t_start[k0] + 0.5 * segs[k0]["dur"]) / DT)
+            hi = min(n, int((t_start[nuc[-1]] + segs[nuc[-1]]["dur"]) / DT))
+            if hi > lo:
+                st[lo:hi] += 5.5 * self.expr * np.linspace(0, 1, hi - lo)
+                st[hi:] += 0.0
+        k = np.hanning(7)
+        k /= k.sum()
+        st = np.convolve(np.pad(st, 3, mode="edge"), k, "valid")
+        return self.f0_med * 2.0 ** (st / 12.0)
+
+    def _dispersion(self):
+        """Fixed all-pass: pseudo-random group delay above ~1 kHz spreads HF energy across the pitch period
+        (min-phase impulses otherwise put all of it into one instant per cycle -> 'buzz'). Magnitude untouched."""
+        key = ("disp", self.dispersion_ms)
+        if key not in self.cache:
+            if self.dispersion_ms <= 0:
+                self.cache[key] = np.ones(NFFT, complex)
+            else:
+                rng = np.random.default_rng(1234)
+                half = NFFT // 2 + 1
+                f = np.arange(half) * SR / NFFT
+                tau = np.convolve(rng.random(half + 40), np.ones(41) / 41, "same")[20:20 + half]
+                tau = (tau - tau.min()) / (tau.max() - tau.min() + 1e-9)
+                ramp = np.clip((f - 900.0) / 2500.0, 0, 1)
+                tau = tau * ramp * self.dispersion_ms / 1000.0                      # seconds
+                phi = -2 * np.pi * np.cumsum(tau) * (SR / NFFT)
+                H = np.ones(NFFT, complex)
+                H[:half] = np.exp(1j * phi)
+                H[half:] = np.conj(H[1:NFFT - half + 1][::-1])
+                self.cache[key] = H
+        return self.cache[key]
 
     # ------------------------------------------------------------- render
     def render(self, T):
@@ -392,6 +532,7 @@ class Voice:
         base = np.floor(tp).astype(int)
         delta = tp - base
         omega = 2 * np.pi * np.fft.fftfreq(NFFT)          # signed bin frequencies (rad/sample)
+        disp = self._dispersion()
         for a in range(0, len(tp), 256):
             sl = slice(a, a + 256)
             c = cep[sl]
@@ -399,7 +540,7 @@ class Voice:
             fold[:, 0] = c[:, 0]
             fold[:, 1:NCEP] = 2.0 * c[:, 1:]
             H = np.exp(np.fft.fft(fold, axis=-1))
-            H *= np.exp(-1j * omega[None, :] * delta[sl, None])
+            H *= np.exp(-1j * omega[None, :] * delta[sl, None]) * disp[None, :]
             ir = np.fft.ifft(H, axis=-1).real[:, :IR_LEN] * fade
             ir *= (gh[sl] * shimmer[sl] * Tper[sl] / 2.0)[:, None]
             for r, b in zip(ir, base[sl]):
@@ -424,8 +565,10 @@ class Voice:
         y[:len(yn)] += yn[:len(y)]
         return y[:n * HOP]
 
-    def synthesize(self, text, normalize=True):
+    def synthesize(self, text, normalize=True, use_units=True, exclude=()):
         segs, phrases = self.plan(text)
+        if use_units and self.units is not None:
+            segs, phrases = self.apply_units(segs, phrases, exclude)
         T = self.tracks(segs, phrases)
         y = self.render(T)
         if normalize:
@@ -466,3 +609,15 @@ def copy_synthesis(fr, voice, n_samples=None):
     T = dict(ch=ch, cn=cn, gh=gh, gn=gn, f0=f0, n=n, t_start=None)
     y = voice.render(T)
     return y if n_samples is None else y[:n_samples]
+
+
+def load_voice(profile_path, use_units=True, **kw):
+    """Load a profile (+ its recorded-unit bank `<stem>.units.npz`, if present)."""
+    import os
+    from .analyze import load_profile
+    voice = Voice(load_profile(profile_path), **kw)
+    npz = os.path.splitext(profile_path)[0] + ".units.npz"
+    if use_units and os.path.exists(npz):
+        from .units import UnitDB
+        voice.units = UnitDB.load(npz)
+    return voice
