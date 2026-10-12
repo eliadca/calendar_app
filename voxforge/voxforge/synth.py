@@ -25,7 +25,7 @@ def _smooth(x):
 
 class Voice:
     def __init__(self, profile=None, tempo=None, seseo=True, seed=1, aspiration=None, expressiveness=1.0,
-                 clarity=1.25, sharpen=1.0, articulation=0.6, dispersion_ms=2.5):
+                 clarity=1.25, sharpen=1.0, articulation=0.6, dispersion_ms=0.0):
         self.profile = profile
         self.rng = np.random.default_rng(seed)
         self.seseo = seseo

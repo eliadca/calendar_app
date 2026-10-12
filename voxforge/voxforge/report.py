@@ -66,11 +66,11 @@ def run(wav_path, outdir, transcript=None):
     rep["copy_synthesis"]["control_shifted_reference_db"] = evaluate.mel_distance(y_ref, sh)[0]
     dsp.write_wav(os.path.join(outdir, "reference_22k.wav"), y_ref)
     dsp.write_wav(os.path.join(outdir, "copy_synthesis.wav"), y_copy)
-    # A/B: previous impulsive vocoder (no phase dispersion) -> more "buzz"
-    y_buzz = synth.copy_synthesis(fr, synth.Voice(prof, dispersion_ms=0.0), len(y_ref))
-    y_buzz *= np.sqrt((y_ref ** 2).sum() / (y_buzz ** 2).sum())
-    dsp.write_wav(os.path.join(outdir, "copy_synthesis_nodispersion.wav"), y_buzz)
-    rep["copy_synthesis"]["logmel_nodispersion_db"] = evaluate.mel_distance(y_ref, y_buzz)[0]
+    # A/B: phase-dispersed vocoder (fewer pulse spikes, but judged worse by ear -> not the default)
+    y_disp = synth.copy_synthesis(fr, synth.Voice(prof, dispersion_ms=2.5), len(y_ref))
+    y_disp *= np.sqrt((y_ref ** 2).sum() / (y_disp ** 2).sum())
+    dsp.write_wav(os.path.join(outdir, "copy_synthesis_dispersion.wav"), y_disp)
+    rep["copy_synthesis"]["logmel_dispersion_db"] = evaluate.mel_distance(y_ref, y_disp)[0]
 
     # ---- B. text-to-speech samples + speaker similarity vs. reference and vs. generic baseline
     ref_stats = evaluate.speaker_stats(y_ref)

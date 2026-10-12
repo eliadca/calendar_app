@@ -21,7 +21,7 @@ python -m unittest discover -s tests                                        # 14
 | Prosodia | contorno de F0 por frase (declinación, acentos, subida en preguntas), alargamiento final | `synth.f0_contour` |
 | Alineación | plantilla sintética de la transcripción + **DTW** (MFCC + sonoridad) → límites de fonema reales, sin ASR | `units.build_db` |
 | Unidades | cada fonema de tu grabación guarda *tus* trayectorias reales (envolvente, ruido, sonoridad, F0); selección por **Viterbi** (coste de contexto + coste de unión) | `units.UnitDB` |
-| Motor | **respuestas al impulso de fase mínima, pitch‑síncronas**, retardo fraccionario exacto, **dispersión de fase** (anti‑zumbido) + ruido en STFT; todo filtrado por *tu* envolvente | `synth.render` |
+| Motor | **respuestas al impulso de fase mínima, pitch‑síncronas**, retardo fraccionario exacto, **dispersión de fase opcional** (`dispersion_ms`, desactivada: a tu oído sonó peor) + ruido en STFT; todo filtrado por *tu* envolvente | `synth.render` |
 
 Todo lo específico de tu voz se calibra por **análisis‑por‑síntesis** (se mide con la misma función en tu audio
 y en el sintetizado, así el sesgo del medidor se cancela): tempo, contraste de formantes, ecualización.
