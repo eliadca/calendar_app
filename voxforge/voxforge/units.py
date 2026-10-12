@@ -288,7 +288,7 @@ def build_db(voice, y_real, fr_real, sentences, iterations=2, verbose=True, pen=
                     a, b = _trim(s0["phone"], tr["v"], a, b)
                 if b - a >= 3:
                     units.append(dict(phone=s0["phone"], prev=s0["prev"], next=s0["next"], stress=bool(s0.get("pstress")),
-                                      wpos=s0["wpos"], pfinal=bool(s0["pfinal"]), sent=si, a=a, b=b,
+                                      wpos=s0["wpos"], pfinal=bool(s0["pfinal"]), sent=si, a=a, b=b, pid=int(pid),
                                       word=s0.get("word", "")))
         if verbose:
             print("  alignment pass %d: mean DTW cost %.3f, %d units" % (it, np.mean(costs), len(units)))

@@ -25,18 +25,20 @@ def _smooth(x):
 
 class Voice:
     def __init__(self, profile=None, tempo=None, seseo=True, seed=1, aspiration=None, expressiveness=1.0,
-                 clarity=1.25, sharpen=1.0, articulation=0.6, dispersion_ms=0.0):
+                 clarity=1.7, sharpen=1.0, articulation=0.9, dispersion_ms=0.0, trans_scale=2.2, enye_nj=False):
         self.profile = profile
         self.rng = np.random.default_rng(seed)
         self.seseo = seseo
         self.expr = expressiveness
         self.dispersion_ms = dispersion_ms
+        self.trans_scale = trans_scale
+        self.enye_nj = enye_nj
         f0 = (profile or {}).get("f0", dict(median=118.0, sd_semitones=3.5, jitter=0.004))
         self.f0_med = f0["median"]
         self.f0_sd = float(np.clip(f0["sd_semitones"], 2.5, 5.0))
         self.jitter = 0.0025        # real micro-jitter; the profile's frame-to-frame value is dominated by intonation
         self.tempo = 1.0 if tempo is None else tempo
-        self._auto_tempo = tempo is None and bool(profile)
+        self._auto_tempo = False        # matching the speaker's fast rate HURT intelligibility (WER 75% vs 46%)
         self.asp = 0.12 if aspiration is None else aspiration
         self.res = np.array(profile["residual"]) if profile else np.zeros(NCEP)
         self.level_db = (profile or {}).get("level_db", -16.0)
@@ -133,6 +135,8 @@ class Voice:
             func = t["stressed_syl"] < 0
             last_syl = t["nsyl"] - 1
             P = t["phones"]
+            if self.enye_nj:                      # /ɲ/ approximated as /n/ + palatal glide
+                P = [x for d in P for x in ([dict(d, p="n"), dict(d, p="j")] if d["p"] == "ɲ" else [d])]
             for k, d in enumerate(P):
                 prev_p = P[k - 1]["p"] if k > 0 else ("_" if True else None)
                 next_p = P[k + 1]["p"] if k + 1 < len(P) else "_"
@@ -411,7 +415,7 @@ class Voice:
                 we = wg = 0.014                                   # recorded -> recorded: already co-articulated
             else:
                 sharp = {"C", "B", "A", "P", "F"}
-                we = min(0.040, 0.9 * min(a["dur"], b["dur"]))
+                we = min(0.040 * self.trans_scale, 0.9 * min(a["dur"], b["dur"]))
                 wg = 0.008 if (a["kind"] in sharp or b["kind"] in sharp) else min(0.022, 0.9 * min(a["dur"], b["dur"]))
                 if a["kind"] == "B" or b["kind"] == "B":
                     wg = 0.003
@@ -611,7 +615,7 @@ def copy_synthesis(fr, voice, n_samples=None):
     return y if n_samples is None else y[:n_samples]
 
 
-def load_voice(profile_path, use_units=True, **kw):
+def load_voice(profile_path, use_units=False, **kw):
     """Load a profile (+ its recorded-unit bank `<stem>.units.npz`, if present)."""
     import os
     from .analyze import load_profile

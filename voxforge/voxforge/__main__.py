@@ -27,7 +27,8 @@ def main(argv=None):
     s.add_argument("-o", "--out", default="speech.wav")
     s.add_argument("--tempo", type=float, default=None, help="speaking-rate factor (1.0 = profile default)")
     s.add_argument("--expressiveness", type=float, default=1.0)
-    s.add_argument("--no-units", action="store_true", help="ignore the recorded-unit bank (rule-based voice)")
+    s.add_argument("--units", action="store_true",
+                   help="use the recorded-unit bank (experimental: with <1 min of audio it is LESS intelligible than rules)")
     s.add_argument("--distincion", action="store_true", help="Castilian c/z = [θ] instead of seseo")
 
     r = sub.add_parser("report", help="clone + run the full objective test suite + write samples")
@@ -53,7 +54,7 @@ def main(argv=None):
         analyze.save_profile(prof, a.out)
         print("profile written to %s (%.1f s)" % (a.out, time.time() - t))
     elif a.cmd == "speak":
-        v = synth.load_voice(a.profile, use_units=not a.no_units, tempo=a.tempo, seseo=not a.distincion,
+        v = synth.load_voice(a.profile, use_units=a.units, tempo=a.tempo, seseo=not a.distincion,
                              expressiveness=a.expressiveness)
         y = v.synthesize(a.text)
         dsp.write_wav(a.out, y)

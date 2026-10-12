@@ -26,7 +26,30 @@ python -m unittest discover -s tests                                        # 14
 Todo lo específico de tu voz se calibra por **análisis‑por‑síntesis** (se mide con la misma función en tu audio
 y en el sintetizado, así el sesgo del medidor se cancela): tempo, contraste de formantes, ecualización.
 
-## Resultados medidos (tu `audioclone.wav`, transcrito)
+## Inteligibilidad (medida con Whisper en el circuito)
+
+Las métricas espectrales de más abajo **no miden si se entiende**. Lo que sí: transcribir el audio con un reconocedor
+(`tools/asr_eval.py`, herramienta de desarrollo, no dependencia) y contar palabras mal entendidas (WER, menor = mejor).
+
+| audio | WER |
+|---|---|
+| tu voz real | 10 % |
+| copy‑synthesis (parámetros reales de tu audio) | **3.6 %** |
+| ídem con el pitch plano | 3.6 % (el pitch no afecta a entenderse) |
+| ídem con envolventes suavizadas ±60 ms | 8.8 % |
+| tu audio con las **vocales** sustituidas por mis prototipos | 18 % |
+| ídem fricativas / sonorantes / oclusivas sustituidas (una clase cada vez) | 5 % cada una |
+| ídem con **todos** los fonemas por modelos estáticos (tiempos y pitch reales) | 43 % |
+| **texto nuevo, reglas + tu perfil (ajustado)** | **~48–53 %** (8–10 oraciones variadas) |
+| texto nuevo, reglas con voz genérica sin tu perfil | 96 % |
+| texto nuevo, banco de unidades de 20 s | 56 % (peor que reglas → desactivado por defecto) |
+
+Conclusión medida: el vocoder y el pitch están bien; lo que falla es el **contenido espectral y las transiciones** que
+el modelo de reglas predice para texto nuevo (los errores de vocales y transiciones se acumulan). Lo que movió la aguja
+al barrer con el reconocedor: tempo 1.0 (igualar tu ritmo rápido lo empeoraba: 75 %), vocales más articuladas
+(`articulation=0.9`, `clarity=1.7`) y transiciones más largas (`trans_scale=2.2`). Afinar más las reglas se estanca en ~40–50 %.
+
+## Resultados medidos (métricas de PARECIDO, no de inteligibilidad) (tu `audioclone.wav`, transcrito)
 
 Reproducibles con `python -m voxforge report mi_voz.wav --transcript mi_voz.tsv`; ver `out/report.md`.
 
