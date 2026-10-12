@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# raw reference recording is the speaker's private data: never commit it
+out/reference_22k.wav

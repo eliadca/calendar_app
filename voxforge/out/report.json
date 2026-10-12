@@ -1,0 +1,183 @@
+{
+ "clone_seconds": 2.2106447219848633,
+ "profile_kB": 7.033203125,
+ "profile": {
+  "f0": {
+   "median": 121.67862277988466,
+   "sd_semitones": 4.9815946001212295,
+   "p5": 81.9820319842896,
+   "p95": 216.58833461406252,
+   "jitter": 0.007952654987974837
+  },
+  "vowel_counts": {
+   "a": 433,
+   "e": 458,
+   "i": 332,
+   "o": 300,
+   "u": 224
+  },
+  "sharpen": 1.4021729275448456,
+  "syll_rate": 8.750583605682653,
+  "stats": {
+   "duration_s": 20.003310657596373,
+   "voiced_frames": 2179,
+   "steady_frames": 1747,
+   "syllable_peaks": 119,
+   "speech_s": 13.599092970521541,
+   "vowel_separation_observed_vs_textbook": 0.8176515133317489
+  }
+ },
+ "copy_synthesis": {
+  "logmel_distance_db": 4.208892909890508,
+  "mean_abs_band_bias_db": 0.3879028405592558,
+  "f0": {
+   "rmse_cents": 65.92510773382634,
+   "median_abs_cents": 18.98161383727677,
+   "voicing_agreement": 0.9279279279279279,
+   "frames": 1951
+  },
+  "realtime_factor": 45.17393366288553,
+  "control_shifted_reference_db": 22.9578476084869
+ },
+ "reference": {
+  "f0_median": 121.67862277988466,
+  "f0_sd_st": 4.9815946001212295
+ },
+ "tts": {
+  "saludo": {
+   "text": "Hola, \u00bfc\u00f3mo est\u00e1s? Esta es mi voz sint\u00e9tica, hecha completamente con c\u00f3digo.",
+   "seconds": 5.587301587301587,
+   "clone": {
+    "f0_median": 122.45188803501907,
+    "f0_sd_st": 2.817803021396962,
+    "ltas_dist_db": 2.30636904469449,
+    "band_err_db": 1.8056102588804026
+   },
+   "generic": {
+    "f0_median": 119.00164531971015,
+    "f0_sd_st": 2.2286030361859375,
+    "ltas_dist_db": 9.681074668071984,
+    "band_err_db": 12.614551903835197
+   }
+  },
+  "pangrama": {
+   "text": "El veloz murci\u00e9lago hind\u00fa com\u00eda feliz cardillo y kiwi, mientras la cig\u00fce\u00f1a tocaba el saxof\u00f3n detr\u00e1s del palenque.",
+   "seconds": 6.4353741496598635,
+   "clone": {
+    "f0_median": 123.74318244404083,
+    "f0_sd_st": 2.209191835088965,
+    "ltas_dist_db": 2.951903289135876,
+    "band_err_db": 1.547382379670427
+   },
+   "generic": {
+    "f0_median": 118.72422526064562,
+    "f0_sd_st": 1.8378450213749062,
+    "ltas_dist_db": 9.160903538013528,
+    "band_err_db": 12.894370896166643
+   }
+  },
+  "numeros": {
+   "text": "Hoy es doce de octubre, y son las tres y veinte de la tarde. Quedan quinientos cuarenta y siete d\u00edas.",
+   "seconds": 5.976417233560091,
+   "clone": {
+    "f0_median": 123.03963105074135,
+    "f0_sd_st": 2.2798921399276,
+    "ltas_dist_db": 2.7970601192898883,
+    "band_err_db": 1.0107324509638127
+   },
+   "generic": {
+    "f0_median": 119.00970630106511,
+    "f0_sd_st": 1.9501936040144177,
+    "ltas_dist_db": 9.561473780568836,
+    "band_err_db": 13.141781278041309
+   }
+  },
+  "pregunta": {
+   "text": "\u00bfPuedes creer que una voz entera cabe en menos de treinta kilobytes?",
+   "seconds": 3.980952380952381,
+   "clone": {
+    "f0_median": 121.83942016972439,
+    "f0_sd_st": 2.299673974363641,
+    "ltas_dist_db": 3.08756266839434,
+    "band_err_db": 0.8882107768722532
+   },
+   "generic": {
+    "f0_median": 118.52324065387145,
+    "f0_sd_st": 1.8553268746330567,
+    "ltas_dist_db": 9.559285749222012,
+    "band_err_db": 13.364528601669491
+   }
+  },
+  "trabalenguas": {
+   "text": "Tres tristes tigres tragaban trigo en un trigal, y el perro de San Roque no tiene rabo.",
+   "seconds": 4.958730158730159,
+   "clone": {
+    "f0_median": 122.0770977360689,
+    "f0_sd_st": 2.3290579582861017,
+    "ltas_dist_db": 2.7009261722779025,
+    "band_err_db": 3.337834757926419
+   },
+   "generic": {
+    "f0_median": 118.75955999267907,
+    "f0_sd_st": 2.029800328723269,
+    "ltas_dist_db": 9.34763836192599,
+    "band_err_db": 12.776886229484246
+   }
+  }
+ },
+ "tts_summary": {
+  "ltas_dist_clone_db": 2.7687642587584995,
+  "ltas_dist_generic_db": 9.46207521956047,
+  "band_err_clone_db": 1.717954124862663,
+  "band_err_generic_db": 12.958423781839377,
+  "f0_median_clone": 122.6302438871189,
+  "f0_median_generic": 118.80367550559428,
+  "realtime_factor": 55.02421237515566,
+  "audio_seconds": 26.93877551020408
+ },
+ "held_out": {
+  "clone_first_half": 3.31831583372448,
+  "generic": 9.699279624222637,
+  "clone_full_in_sample": 3.1230985362660424,
+  "f0_median_second_half": 129.59809686332233,
+  "f0_median_clone_first_half": 114.76110121688981
+ },
+ "vowel_accuracy_vs_textbook": 1.0,
+ "vowel_confusion": [
+  [
+   8,
+   0,
+   0,
+   0,
+   0
+  ],
+  [
+   0,
+   8,
+   0,
+   0,
+   0
+  ],
+  [
+   0,
+   0,
+   8,
+   0,
+   0
+  ],
+  [
+   0,
+   0,
+   0,
+   8,
+   0
+  ],
+  [
+   0,
+   0,
+   0,
+   0,
+   8
+  ]
+ ]
+}
